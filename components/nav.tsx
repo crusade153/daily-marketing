@@ -9,6 +9,7 @@ const LINKS = [
   { href: '/hierarchy', label: '계층별 손익' },
   { href: '/products', label: '제품별 매출' },
   { href: '/trend', label: '월별 추이' },
+  { href: '/segment', label: 'ABCD 등급관리' },
   { href: '/daily', label: '일별 매출' },
   { href: '/input', label: '장려금·일반비 입력' },
   { href: '/mapping', label: '제품 매핑' },

@@ -1,12 +1,13 @@
 import 'server-only';
 import { unstable_cache } from 'next/cache';
 import { runQuery } from './bigquery';
-import { getPeriods, progressOf, yearStartOf, ymRange, type Periods } from './period';
+import { getPeriods, monthLabel, progressOf, yearStartOf, ymRange, type Periods } from './period';
 import { buildMonthRows, buildRows, ORPHAN_NAME, type Axis } from './pnl';
 import { buildPriceTrend, type PriceItem, type PriceTrend } from './price';
 import { getStore, storageKind, TABS, type Cell } from './sheets';
+import { SEG_PERIODS, type SegPeriod, type SegProduct } from './segment';
 import { aggregateTrend, toMonthRows, type MonthBlock, type TrendData } from './trend';
-import type { DailyFact, DashboardData, Hierarchy, ManualInput, MaterialFact, MonthFact, ProductMap } from './types';
+import type { DailyFact, DashboardData, Hierarchy, ManualInput, MaterialFact, MonthFact, MonthRow, ProductMap } from './types';
 
 // 원천: CO-PA (GL 대사 검증된 실제원가 VV_COGS_A, 총매출 VV101). 당월·전월·3개월 원가를 같은 원천으로 맞춘다.
 // 표준원가 필드(VV_COGS_S, VV2xx)는 2026-04 이후 부풀려져 있어 쓰지 않는다.
@@ -365,4 +366,66 @@ export async function getPriceTrend(today?: string): Promise<PriceTrend> {
     it.qty[cur] = r.mtd.qty;
   }
   return buildPriceTrend(months, [...items.values()], labels);
+}
+
+// ── 세그먼트(ABCD 매트릭스) ───────────────────────────────────
+
+export interface SegmentData {
+  products: SegProduct[];
+  periods: { id: SegPeriod; label: string; costNote: string | null }[];
+  dataDate: string | null;
+}
+
+/** 제품별 기간 금액: 올해 누계(마감월 실적 + 당월 예상), 당월 예상, 전월 실적, 전전월 실적(비교 기준) */
+export async function getSegment(today?: string): Promise<SegmentData> {
+  const { d, blocks } = await getMonthBlocks(today);
+  const n = blocks.length;
+  const prev2 = n >= 3 ? blocks[n - 3] : null;
+  const map = new Map<string, SegProduct>();
+  const zero = (): [number, number, number, number] => [0, 0, 0, 0];
+  const at = (r: MonthRow) => {
+    let p = map.get(r.matnr);
+    if (!p) {
+      const { matnr, name, l1, l1t, l2, l2t, l3, l3t, l4, l4t } = r;
+      p = { matnr, name, l1, l1t, l2, l2t, l3, l3t, l4, l4t, a: SEG_PERIODS.map(zero) };
+      map.set(r.matnr, p);
+    }
+    return p;
+  };
+  const add = (r: MonthRow, period: SegPeriod) => {
+    if (r.name === ORPHAN_NAME) return;
+    const v = at(r).a[SEG_PERIODS.indexOf(period)];
+    v[0] += r.amt.sales;
+    v[1] += r.amt.qty;
+    v[2] += r.amt.cogs;
+    v[3] += r.amt.incentive + r.amt.general;
+  };
+  for (const b of blocks) for (const r of b.rows) add(r, 'ytd');
+  for (const r of toMonthRows(d.rows, 'fcst')) add(r, 'fcst');
+  for (const r of toMonthRows(d.rows, 'prev')) add(r, 'prev');
+  if (prev2) for (const r of prev2.rows) add(r, 'prev2');
+
+  // 화면 전달량을 줄이려고 원 단위로 반올림 (예상치는 소수가 길다)
+  const products = [...map.values()]
+    .map((p) => ({ ...p, a: p.a.map((v) => v.map(Math.round) as [number, number, number, number]) }))
+    .filter((p) => p.a.some((v) => v[0] || v[2]));
+
+  const cur = blocks[n - 1];
+  const prevBlock = n >= 2 ? blocks[n - 2] : null;
+  const note = (b: MonthBlock | null) =>
+    b && b.filled < b.l1Total ? `${monthLabel(b.ym)} 장려금·일반비 ${b.filled}/${b.l1Total}개 계층 입력` : null;
+  const ytdMissing = blocks.filter((b) => b.filled === 0).length;
+  return {
+    products,
+    periods: [
+      {
+        id: 'ytd',
+        label: `올해 누계 (${monthLabel(blocks[0].ym)}~${monthLabel(cur.ym)} 예상)`,
+        costNote: ytdMissing ? `장려금·일반비 미입력 ${ytdMissing}/${n}개월` : null,
+      },
+      { id: 'fcst', label: `${monthLabel(d.curYm)} 예상`, costNote: note(cur) },
+      { id: 'prev', label: `${monthLabel(d.prevYm)} 실적`, costNote: note(prevBlock) },
+    ],
+    dataDate: d.dataDate,
+  };
 }
