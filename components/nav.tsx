@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import RefreshButton from './refresh-button';
 
 const LINKS = [
-  { href: '/', label: '요약' },
+  { href: '/', label: '경영 요약' },
   { href: '/hierarchy', label: '계층별 손익' },
   { href: '/products', label: '제품별 매출' },
   { href: '/trend', label: '월별 추이' },
@@ -18,18 +18,22 @@ export default function Nav() {
   const path = usePathname();
   if (path === '/login') return null;
   return (
-    <header className="sticky top-0 z-20 border-b border-border bg-surface">
-      <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5 md:px-6">
-        <Link href="/" className="text-[15px] font-bold tracking-tight">
-          일일 매출·손익
+    <header className="app-header">
+      <a href="#main-content" className="skip-link">본문으로 이동</a>
+      <div className="header-inner">
+        <Link href="/" className="brand">
+          <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
+          <span>일일 매출·손익<span className="brand-caption">BUSINESS PERFORMANCE</span></span>
         </Link>
-        <nav className="flex flex-1 gap-1 overflow-x-auto text-sm">
+        <nav className="main-nav" aria-label="주요 메뉴">
           {LINKS.map((l) => {
             const active = l.href === '/' ? path === '/' : path.startsWith(l.href);
             return (
               <Link
                 key={l.href}
                 href={l.href}
+                prefetch={false}
+                aria-current={active ? 'page' : undefined}
                 className={`whitespace-nowrap rounded-md px-3 py-1.5 ${
                   active ? 'bg-accent-soft font-semibold text-accent' : 'text-muted hover:bg-surface-2'
                 }`}

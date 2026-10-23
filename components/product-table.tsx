@@ -7,6 +7,7 @@ import { monthLabel } from '@/lib/period';
 import { SCENARIO_LABEL, type MaterialRow, type Scenario } from '@/lib/types';
 
 const PAGE = 200;
+const KEY_COLS = new Set(['matnr', 'name', 'l1', 'qty', 'price', 'sales', 'gp', 'gpm', 'growth', 'pprice', 'pchg']);
 const qtyFmt = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 0 });
 
 interface Ctx {
@@ -97,9 +98,10 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<{ id: string; desc: boolean }>({ id: 'sales', desc: true });
   const [limit, setLimit] = useState(PAGE);
+  const [detail, setDetail] = useState(false);
 
   const compare = scenario !== 'prev';
-  const cols = COLS.filter((c) => compare || !c.compare);
+  const cols = COLS.filter((c) => (compare || !c.compare) && (detail || KEY_COLS.has(c.id)));
 
   const l1s = useMemo(() => {
     const m = new Map<string, { label: string; sales: number }>();
@@ -149,6 +151,11 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
     setLimit(PAGE);
   };
   const label = (s: Scenario) => `${monthLabel(s === 'prev' ? prevYm : curYm)} ${SCENARIO_LABEL[s].split(' ')[1]}`;
+  const totals: Record<string, string> = {
+    matnr: '합계', name: l1 ? l1s.find(([k]) => k === l1)?.[1].label ?? '' : '전체 제품',
+    sales: mil(total.sales), cogs: mil(total.cogs), gp: mil(total.gp), gpm: pct(total.gpm),
+    inc: mil(total.incentive), gen: mil(total.general), op: mil(total.op), opm: pct(total.opm),
+  };
 
   return (
     <div className="card">
@@ -191,14 +198,19 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
             setLimit(PAGE);
           }}
           placeholder="제품코드·제품명·LV2~LV4 검색"
+          aria-label="제품 검색"
           className="min-w-[200px] flex-1 rounded-md border border-border bg-surface px-3 py-1.5"
         />
+        <div className="segmented" role="group" aria-label="표시할 제품 지표">
+          <button type="button" aria-pressed={!detail} onClick={() => setDetail(false)}>핵심 지표</button>
+          <button type="button" aria-pressed={detail} onClick={() => setDetail(true)}>전체 지표</button>
+        </div>
         <span className="ml-auto text-xs text-muted">
           {list.length.toLocaleString()}개 제품 · 금액 백만원, 단가 원/EA · 머리글을 누르면 정렬
         </span>
       </div>
-      <div className="max-h-[72vh] overflow-auto">
-        <table className="dtable">
+      <div className="data-scroll">
+        <table className="dtable product-dtable">
           <thead>
             <tr>
               {cols.map((c, i) => (
@@ -218,22 +230,7 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
           </thead>
           <tbody>
             <tr className="total">
-              <td className="sticky left-0 z-[1]">합계</td>
-              <td colSpan={5} className="text-xs font-normal text-muted">
-                {l1 ? l1s.find(([k]) => k === l1)?.[1].label : '전체'}
-                {query && ` · "${query}"`}
-              </td>
-              <td className="num">-</td>
-              <td className="num">-</td>
-              <td className="num">{mil(total.sales)}</td>
-              <td className="num">{mil(total.cogs)}</td>
-              <td className="num">{mil(total.gp)}</td>
-              <td className="num">{pct(total.gpm)}</td>
-              <td className="num">{mil(total.incentive)}</td>
-              <td className="num">{mil(total.general)}</td>
-              <td className="num">{mil(total.op)}</td>
-              <td className="num">{pct(total.opm)}</td>
-              {compare && <td colSpan={4} className="border-l border-border" />}
+              {cols.map((c) => <td key={c.id} className={c.num ? 'num' : ''}>{totals[c.id] ?? (c.num ? '−' : '')}</td>)}
             </tr>
             {list.slice(0, limit).map(({ r, ctx }) => (
               <tr key={r.matnr}>

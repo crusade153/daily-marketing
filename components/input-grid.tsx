@@ -233,7 +233,7 @@ export default function InputGrid({
   const unitLabel = UNITS.find((u) => u.v === unit)?.label;
 
   return (
-    <div className="space-y-3">
+    <div className="input-workspace">
       <div className="card flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
         <div className="flex flex-wrap overflow-hidden rounded-md border border-border" role="group" aria-label="입력 월">
           {months.map(({ ym: m, kind }) => {
@@ -302,11 +302,10 @@ export default function InputGrid({
         {isFcst
           ? '진행 중인 달은 월 전체 예상 금액을 입력합니다. 누계 손익에는 진행률만큼 반영됩니다.'
           : '마감된 달은 확정된 실적 금액을 입력합니다.'}{' '}
-        입력값은 그 LV1 안에서 제품별 매출 비중으로 나뉘어 LV2~LV4·제품에 배부됩니다. 엑셀에서 장려금·일반비 두 열을 복사해 첫
-        칸에 붙여넣을 수 있습니다.
+        장려금·일반비 두 열은 엑셀에서 복사해 첫 칸에 붙여넣을 수 있습니다.
       </p>
 
-      <div className="card max-h-[70vh] overflow-auto">
+      <div className="card data-scroll">
         <table className="dtable" ref={tableRef}>
           <thead>
             <tr>

@@ -8,13 +8,11 @@ export const dynamic = 'force-dynamic';
 export default async function ProductsPage() {
   const d = await getDashboard();
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-bold">제품별 매출</h1>
-        <p className="text-xs text-muted">
-          제품코드 단위 손익입니다. 판매단가는 제품별 매출 ÷ 판매수량(EA)이고, 예상 보기의 단가는 누계와 같습니다. 장려금·일반비는
-          제품계층 LV1 입력값을 이 제품의 매출 비중만큼 배부한 금액입니다.
-        </p>
+    <div className="data-page">
+      <div className="page-intro">
+        <h1>제품별 매출</h1>
+        <p>제품별 매출과 판매단가를 비교합니다. ‘전체 지표’에서 상세 손익과 하위 제품계층을 확인할 수 있습니다.</p>
+        <details className="method-note"><summary>단가 및 비용 배부 기준</summary><p>판매단가 = 제품별 매출 ÷ 판매수량(EA). 월 예상 단가는 누계와 동일합니다. 장려금·일반비는 제품계층 LV1 입력값을 해당 제품의 매출 비중으로 배부합니다.</p></details>
       </div>
       <Notices d={d} />
       <ProductTable rows={d.rows.filter((r) => r.name !== ORPHAN_NAME)} curYm={d.curYm} prevYm={d.prevYm} />

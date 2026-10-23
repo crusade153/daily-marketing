@@ -17,12 +17,9 @@ export default async function TrendPage({
   const data = await getTrend(axis);
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-bold">월별 추이</h1>
-        <p className="text-xs text-muted">
-          올해 1월부터의 월 손익입니다. 마감월은 CO-PA 실적 매출·실제원가에 그 달 입력한 장려금·일반비를 더하고, 진행 중인 달은
-          요약 화면의 월 예상과 같습니다.
-        </p>
+      <div className="page-intro">
+        <h1>월별 실적 추이</h1>
+        <p>연간 매출·이익률 흐름과 전월 대비 변동 요인을 확인합니다. 당월은 월말 예상, 이전 월은 마감 실적입니다.</p>
       </div>
       <TrendView key={axis} data={data} axes={AXES} />
     </div>

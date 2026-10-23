@@ -1,33 +1,32 @@
-import { dateLabel, monthLabel } from '@/lib/period';
+import { dateLabel, monthLabel, ymLabel } from '@/lib/period';
 import type { DashboardData } from '@/lib/types';
 
 export default function PeriodBar({ d }: { d: DashboardData }) {
   const { elapsed, daysInMonth, rate } = d.progress;
-  const costRange = `${monthLabel(d.costYms[0])}~${monthLabel(d.costYms[2])}`;
   return (
-    <section className="card flex flex-wrap items-center gap-x-8 gap-y-3 px-5 py-4">
+    <section className="page-heading">
       <div>
-        <div className="text-xs text-muted">데이터 기준일</div>
-        <div className="text-lg font-bold">{d.dataDate ? dateLabel(d.dataDate) : '당월 실적 없음'}</div>
+        <p className="eyebrow">{ymLabel(d.curYm)}</p>
+        <h1>매출·손익 현황</h1>
       </div>
-      <div className="min-w-[220px] flex-1">
-        <div className="mb-1 flex justify-between text-xs text-muted">
-          <span>
-            {monthLabel(d.curYm)} 진행률 · {elapsed}일 ÷ {daysInMonth}일
-          </span>
-          <span className="font-semibold text-text">{(rate * 100).toFixed(1)}%</span>
+      <div className="period-status">
+        <span className="status-dot" aria-hidden="true" />
+        <span>데이터 기준 <b>{d.dataDate ? dateLabel(d.dataDate) : '당월 실적 없음'}</b></span>
+        <div className="period-progress">
+          <span>월 진행률 <b>{(rate * 100).toFixed(1)}%</b> <span className="text-muted">({elapsed}/{daysInMonth}일)</span></span>
+          <div className="progress-track" role="progressbar" aria-label="월 진행률" aria-valuenow={Math.round(rate * 100)} aria-valuemin={0} aria-valuemax={100}>
+            <div style={{ width: `${Math.min(rate, 1) * 100}%` }} />
+          </div>
         </div>
-        <div className="h-2.5 overflow-hidden rounded-full bg-surface-2">
-          <div className="h-full rounded-full bg-accent" style={{ width: `${Math.min(rate, 1) * 100}%` }} />
-        </div>
-      </div>
-      <div className="text-xs leading-5 text-muted">
-        <div>
-          당월 매출원가 = 판매수량 × <b className="text-text">{costRange} 평균 단위원가</b>
-        </div>
-        <div>
-          당월 예상 = 누계 ÷ {elapsed}일 × {daysInMonth}일 · 전월({monthLabel(d.prevYm)}) = CO-PA 실적
-        </div>
+        <details className="basis-details">
+          <summary>산출 기준</summary>
+          <div className="basis-popover">
+            <b>예상 손익 산출 기준</b>
+            <p>당월 매출원가: 판매수량 × {monthLabel(d.costYms[0])}~{monthLabel(d.costYms[2])} 평균 단위원가</p>
+            <p>월 예상: 누계 ÷ 경과일수 × 월 달력일수</p>
+            <p>전월: {monthLabel(d.prevYm)} 마감 실적 · 매출 원천: CO-PA</p>
+          </div>
+        </details>
       </div>
     </section>
   );

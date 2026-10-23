@@ -38,13 +38,13 @@ export default async function MappingPage() {
   const owners = new Set(maps.map((m) => m.owner).filter(Boolean));
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-bold">제품 매핑 (CM1·CM2·CM3·카테고리·담당자)</h1>
-        <p className="text-xs text-muted">
-          매핑은 구글 시트 product_map 탭에서 직접 입력합니다. 열 순서: MATNR | 제품명 | CM1 | CM2 | CM3 | 카테고리 | 담당자. 시트를
-          고친 뒤 최대 5분 안에 반영되며, 바로 보려면 상단의 데이터 새로고침을 누르세요.
+    <div className="data-page">
+      <div className="page-intro">
+        <h1>제품 매핑 관리</h1>
+        <p>
+          제품별 CM·카테고리·담당자 연결 현황을 확인합니다. 연결 정보는 구글 시트에서 관리하며, 변경 후 최대 5분 이내에 반영됩니다.
         </p>
+        <details className="method-note"><summary>매핑 정보 관리 안내</summary><p>구글 시트의 product_map 탭에서 입력합니다. 열 순서: 제품코드(MATNR) | 제품명 | CM1 | CM2 | CM3 | 카테고리 | 담당자. 변경 내용을 즉시 반영하려면 상단 ‘데이터 새로고침’을 선택하세요.</p></details>
       </div>
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="card px-4 py-3">
@@ -66,7 +66,7 @@ export default async function MappingPage() {
               구글 시트 열기 ↗
             </a>
           ) : (
-            <span className="text-muted">SHEET_ID 미설정 · 로컬 파일(.data/product_map.json) 사용 중</span>
+            <span className="text-muted">개발 환경의 제품 매핑 정보를 사용 중입니다.</span>
           )}
         </div>
       </section>

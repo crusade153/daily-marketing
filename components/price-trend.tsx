@@ -6,7 +6,7 @@ import { tone, won } from '@/lib/format';
 import { monthLabel } from '@/lib/period';
 import type { PriceTrend as Trend } from '@/lib/price';
 
-const AXIS_TICK = { fontSize: 11, fill: 'var(--viz-axis)' };
+const AXIS_TICK = { fontSize: 12, fill: 'var(--viz-axis)' };
 const minus = (s: string) => s.replace('-', '−');
 const signedPct = (r: number | null) => (r == null ? '-' : `${r > 0 ? '+' : ''}${minus((r * 100).toFixed(1))}%`);
 
@@ -26,7 +26,7 @@ export default function PriceTrend({ trend }: { trend: Trend }) {
   return (
     <section className="card px-4 py-3">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 className="text-sm font-bold">판매단가 추이 · {series.label}</h2>
+        <h2 className="text-sm font-bold">동일제품 판매단가 추이</h2>
         <select
           value={series.key}
           onChange={(e) => setKey(e.target.value)}
@@ -40,12 +40,11 @@ export default function PriceTrend({ trend }: { trend: Trend }) {
           ))}
         </select>
         <span className="text-xs text-muted">
-          단가지수 = {first ? monthLabel(first.ym) : '첫 달'} 100. 전월·당월 모두 팔린 같은 제품의 단가 변화만 쌓은 값이라 제품
-          구성(믹스) 변화가 섞이지 않습니다
+          {first ? monthLabel(first.ym) : '첫 달'} = 100 · 제품 구성 변화를 제외한 단가 변동
         </span>
       </div>
-      <div className="mt-2 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-        <div className="h-[240px]">
+      <div className="mt-4 price-layout">
+        <div className="price-chart">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data} margin={{ top: 12, right: 16, bottom: 0, left: 0 }}>
               <CartesianGrid stroke="var(--viz-grid)" vertical={false} />
@@ -63,7 +62,7 @@ export default function PriceTrend({ trend }: { trend: Trend }) {
                 stroke="var(--viz-1)"
                 strokeWidth={2}
                 connectNulls
-                animationDuration={350}
+                animationDuration={150}
                 dot={(p) => {
                   const { cx, cy, index, payload } = p as { cx: number; cy: number; index: number; payload: { partial: boolean } };
                   if (cx == null || cy == null) return <g key={index} />;
@@ -83,7 +82,7 @@ export default function PriceTrend({ trend }: { trend: Trend }) {
             </LineChart>
           </ResponsiveContainer>
         </div>
-        <div className="overflow-x-auto">
+        <div className="price-table">
           <table className="dtable">
             <thead>
               <tr>
@@ -92,7 +91,7 @@ export default function PriceTrend({ trend }: { trend: Trend }) {
                   단가 변동
                 </th>
                 <th className="num" title="매출 ÷ 판매수량(EA), 전 제품">
-                  평균단가(원/EA)
+                  평균단가(원)
                 </th>
                 <th className="num">평균단가 변동</th>
                 <th className="num" title="평균단가 변동 중 단가 변동으로 설명되지 않는 부분">
@@ -122,12 +121,12 @@ export default function PriceTrend({ trend }: { trend: Trend }) {
               })}
             </tbody>
           </table>
-          <p className="mt-2 text-[11px] leading-4 text-muted">
-            평균단가는 단위가 다른 제품이 섞여 있어 그 자체로는 의미가 약하고, 변동분은 &quot;단가 변동 + 믹스·기타&quot;로 나눠 읽습니다.
-            단가가 0.2배 미만·5배 초과로 바뀐 제품은 단위·정정 전표로 보고 비교에서 뺐습니다. 진행 중인 달은 누계 기준입니다.
-          </p>
         </div>
       </div>
+      <details className="method-note">
+        <summary>지표 해석 및 비교 기준</summary>
+        <p>동일제품 단가지수는 전월과 당월에 공통으로 판매된 제품의 단가 변동을 누적한 값입니다. 평균단가(매출 ÷ 판매수량 EA)의 변동은 단가 변동과 제품 구성(믹스)·기타 요인으로 구분합니다. 단가가 전월의 0.2배 미만 또는 5배 초과인 제품은 비교에서 제외하며, 당월은 누계 기준입니다.</p>
+      </details>
     </section>
   );
 }

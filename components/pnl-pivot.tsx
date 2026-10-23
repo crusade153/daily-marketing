@@ -12,25 +12,25 @@ const HIER: Axis[] = ['l1', 'l2', 'l3', 'l4'];
 const DEPTH = 4;
 type Slot = Axis | 'none';
 
-function Cells({ g, s, compare }: { g: Pick<Group, 'mtd' | 'fcst' | 'prev'>; s: Scenario; compare: boolean }) {
+function Cells({ g, s, compare, detail }: { g: Pick<Group, 'mtd' | 'fcst' | 'prev'>; s: Scenario; compare: boolean; detail: boolean }) {
   const m = metrics(g[s]);
   const p = metrics(g.prev);
   return (
     <>
       <td className="num font-semibold">{mil(m.sales)}</td>
-      <td className="num">{mil(m.cogs)}</td>
+      {detail && <td className="num">{mil(m.cogs)}</td>}
       <td className="num">{mil(m.gp)}</td>
       <td className={`num ${tone(m.gpm)}`}>{pct(m.gpm)}</td>
-      <td className="num">{mil(m.incentive)}</td>
-      <td className="num">{mil(m.general)}</td>
+      {detail && <td className="num">{mil(m.incentive)}</td>}
+      {detail && <td className="num">{mil(m.general)}</td>}
       <td className={`num font-semibold ${tone(m.op)}`}>{mil(m.op)}</td>
       <td className={`num ${tone(m.opm)}`}>{pct(m.opm)}</td>
       {compare && (
         <>
           <td className="num border-l border-border text-muted">{mil(p.sales)}</td>
           <td className={`num ${tone(m.sales - p.sales)}`}>{p.sales > 0 ? pct(growth(m.sales, p.sales)) : '-'}</td>
-          <td className="num text-muted">{pct(p.opm)}</td>
-          <td className={`num ${tone((m.opm ?? 0) - (p.opm ?? 0))}`}>{ppt(m.opm, p.opm)}</td>
+          {detail && <td className="num text-muted">{pct(p.opm)}</td>}
+          {detail && <td className={`num ${tone((m.opm ?? 0) - (p.opm ?? 0))}`}>{ppt(m.opm, p.opm)}</td>}
         </>
       )}
     </>
@@ -58,6 +58,7 @@ export default function PnlPivot({
   const [scenario, setScenario] = useState<Scenario>('fcst');
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
+  const [detail, setDetail] = useState(false);
 
   // 실제 드릴 경로: 첫 '없음'에서 끊는다
   const path = useMemo(() => {
@@ -129,18 +130,16 @@ export default function PnlPivot({
         <Fragment key={k}>
           <tr
             className={`${expandable ? 'cursor-pointer' : ''} ${depth === 0 && expandable ? 'subtotal' : ''}`}
-            onClick={expandable ? () => toggle(k) : undefined}
           >
             <td
               className={`max-w-[360px] truncate ${depth > 0 ? 'text-[12.5px]' : ''}`}
               style={{ paddingLeft: 10 + depth * 18 }}
               title={`${AXIS_LABEL[axis]}: ${g.label}${showCode ? ` (${g.key})` : ''}`}
             >
-              <span className="mr-1.5 inline-block w-3 text-muted">{expandable ? (isOpen ? '▾' : '▸') : ''}</span>
-              {g.label}
+              {expandable ? <button type="button" onClick={() => toggle(k)} aria-expanded={isOpen} className="text-left hover:text-accent"><span className="mr-1.5 inline-block w-3 text-muted" aria-hidden="true">{isOpen ? '▾' : '▸'}</span>{g.label}</button> : g.label}
               {showCode && <span className="ml-1.5 text-[11px] font-normal text-muted">{g.key}</span>}
             </td>
-            <Cells g={g} s={scenario} compare={compare} />
+            <Cells g={g} s={scenario} compare={compare} detail={detail} />
           </tr>
           {isOpen && renderLevel(g.rows, depth + 1, k)}
         </Fragment>
@@ -186,8 +185,13 @@ export default function PnlPivot({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="제품·계층·담당자 검색"
+            aria-label="계층 및 제품 검색"
             className="min-w-[160px] flex-1 rounded-md border border-border bg-surface px-3 py-1.5"
           />
+          <div className="segmented" role="group" aria-label="표시할 손익 지표">
+            <button type="button" aria-pressed={!detail} onClick={() => setDetail(false)}>핵심 지표</button>
+            <button type="button" aria-pressed={detail} onClick={() => setDetail(true)}>전체 지표</button>
+          </div>
           {path.length > 1 && (
             <div className="flex gap-1 text-xs">
               {path.slice(1).map((_, i) => (
@@ -207,31 +211,31 @@ export default function PnlPivot({
               className="rounded-md border border-border px-3 py-1.5 font-semibold hover:bg-surface-2"
               title="제품별 손익 원천 (당월 누계·예상·전월, 올해 월별)"
             >
-              RAW 엑셀 받기
+              원천 데이터 다운로드
             </a>
           )}
           <span className="ml-auto text-xs text-muted">단위: 백만원</span>
         </div>
       )}
-      <div className="max-h-[70vh] overflow-auto">
-        <table className="dtable">
+      <div className="data-scroll">
+        <table className="dtable hierarchy-dtable">
           <thead>
             <tr>
               <th className="text-left">{path.map((a) => AXIS_LABEL[a]).join(' › ')}</th>
               <th className="num">매출</th>
-              <th className="num">매출원가</th>
+              {detail && <th className="num">매출원가</th>}
               <th className="num">매출이익</th>
               <th className="num">이익률</th>
-              <th className="num">장려금</th>
-              <th className="num">일반비</th>
+              {detail && <th className="num">장려금</th>}
+              {detail && <th className="num">일반비</th>}
               <th className="num">영업이익</th>
               <th className="num">영업이익률</th>
               {compare && (
                 <>
                   <th className="num border-l border-border">전월 매출</th>
                   <th className="num">매출 증감</th>
-                  <th className="num">전월 영업이익률</th>
-                  <th className="num">영업이익률 차이</th>
+                  {detail && <th className="num">전월 영업이익률</th>}
+                  {detail && <th className="num">영업이익률 차이</th>}
                 </>
               )}
             </tr>
@@ -239,7 +243,7 @@ export default function PnlPivot({
           <tbody>
             <tr className="total">
               <td>합계</td>
-              <Cells g={total} s={scenario} compare={compare} />
+              <Cells g={total} s={scenario} compare={compare} detail={detail} />
             </tr>
             {renderLevel(filtered, 0, '')}
           </tbody>

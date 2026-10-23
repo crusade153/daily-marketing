@@ -23,14 +23,14 @@ export default async function InputPage() {
   const items = [...byL1.values()].sort((a, b) => sum(b) - sum(a) || a.l1.localeCompare(b.l1));
 
   return (
-    <div className="space-y-3">
-      <div>
-        <h1 className="text-lg font-bold">장려금·일반비 입력</h1>
-        <p className="text-xs text-muted">
-          제품계층 LV1별 월 금액을 입력합니다. 저장하면 구글 시트 manual_input_lv1 탭에 (월, LV1) 기준으로 덮어쓰고, 손익과 월별
-          추이에 바로 반영됩니다. 월 버튼 아래 숫자는 입력한 LV1 수 / 그 달 매출이 있는 LV1 수입니다.
-          {d.storage === 'local' && ' (현재 SHEET_ID가 없어 로컬 파일에 저장 중)'}
+    <div className="data-page">
+      <div className="page-intro">
+        <h1>장려금·일반비 입력</h1>
+        <p>
+          제품계층 LV1별 월 전체 비용을 입력합니다. 저장한 금액은 손익 현황과 월별 추이에 반영됩니다.
+          {d.storage === 'local' && ' 현재 입력값은 개발 환경에 저장됩니다.'}
         </p>
+        <details className="method-note"><summary>입력 및 저장 안내</summary><p>월별 숫자는 입력 완료 계층 수 / 매출 발생 계층 수입니다. 저장 시 선택한 월·제품계층의 기존 금액을 갱신합니다. 마감월은 실적 비용, 당월은 월 전체 예상 비용을 입력합니다. 입력 금액은 해당 제품계층 내 제품별 매출 비중으로 배부됩니다.</p></details>
       </div>
       <InputGrid items={items} inputs={inputs} months={blocks.map(({ ym, kind }) => ({ ym, kind }))} curYm={d.curYm} />
     </div>

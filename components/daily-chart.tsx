@@ -27,6 +27,7 @@ export default function DailyChart({
     return [...s].sort((a, b) => b[1] - a[1]).map(([k]) => k);
   }, [daily]);
   const [l1, setL1] = useState('전체');
+  const [view, setView] = useState<'cumulative' | 'daily'>('cumulative');
 
   const series = useMemo(() => {
     const cur = new Array(daysInMonth + 1).fill(0);
@@ -67,15 +68,19 @@ export default function DailyChart({
   const prv = monthLabel(prevYm);
 
   return (
-    <div className="space-y-4">
+    <div className="daily-layout">
       <div className="card px-4 py-3">
         <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">
-          <select value={l1} onChange={(e) => setL1(e.target.value)} className="rounded-md border border-border bg-surface px-2 py-1.5">
+          <select aria-label="일별 매출 제품계층" value={l1} onChange={(e) => setL1(e.target.value)} className="rounded-md border border-border bg-surface px-2 py-1.5">
             <option>전체</option>
             {l1s.map((k) => (
               <option key={k}>{k}</option>
             ))}
           </select>
+          <div className="segmented" role="group" aria-label="일별 매출 차트 보기">
+            <button type="button" aria-pressed={view === 'cumulative'} onClick={() => setView('cumulative')}>누계 비교</button>
+            <button type="button" aria-pressed={view === 'daily'} onClick={() => setView('daily')}>일별 비교</button>
+          </div>
           {last && (
             <span className="text-muted">
               {cur} {last.day}일 누계 <b className="text-text">{eok(last.cum ?? 0)}</b> · {prv} 같은 날까지{' '}
@@ -85,7 +90,6 @@ export default function DailyChart({
               </span>
             </span>
           )}
-          <span className="ml-auto text-xs text-muted">막대·선 단위: 백만원</span>
         </div>
         <div className="h-[340px]">
           <ResponsiveContainer width="100%" height="100%">
@@ -93,21 +97,11 @@ export default function DailyChart({
               <CartesianGrid stroke="var(--border)" vertical={false} />
               <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--muted)' }} tickLine={false} axisLine={{ stroke: 'var(--border)' }} />
               <YAxis
-                yAxisId="d"
                 tickFormatter={(v) => mil(v)}
                 tick={{ fontSize: 11, fill: 'var(--muted)' }}
                 tickLine={false}
                 axisLine={false}
                 width={56}
-              />
-              <YAxis
-                yAxisId="c"
-                orientation="right"
-                tickFormatter={(v) => mil(v)}
-                tick={{ fontSize: 11, fill: 'var(--muted)' }}
-                tickLine={false}
-                axisLine={false}
-                width={64}
               />
               <Tooltip
                 formatter={(v, name) => [v == null ? '-' : `${mil(Number(v))} 백만원`, name]}
@@ -115,15 +109,16 @@ export default function DailyChart({
                 contentStyle={{ fontSize: 12, borderRadius: 8, borderColor: 'var(--border)' }}
               />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar yAxisId="d" dataKey="sales" name={`${cur} 일매출`} fill="var(--bar-cur)" radius={[3, 3, 0, 0]} maxBarSize={22} />
-              <Line yAxisId="c" dataKey="cum" name={`${cur} 누계`} stroke="var(--bar-cur)" strokeWidth={2} dot={false} connectNulls={false} />
-              <Line yAxisId="c" dataKey="prevCum" name={`${prv} 누계`} stroke="var(--bar-prev)" strokeWidth={2} strokeDasharray="4 3" dot={false} />
+              {view === 'daily' ? <Bar dataKey="sales" name={`${cur} 일매출`} fill="var(--bar-cur)" radius={[3, 3, 0, 0]} maxBarSize={16} animationDuration={150} /> : <Line dataKey="cum" name={`${cur} 누계`} stroke="var(--bar-cur)" strokeWidth={2.5} dot={false} connectNulls={false} animationDuration={150} />}
+              {view === 'daily' ? <Bar dataKey="prevDaily" name={`${prv} 일매출`} fill="var(--bar-prev)" radius={[3, 3, 0, 0]} maxBarSize={16} animationDuration={150} /> : <Line dataKey="prevCum" name={`${prv} 누계`} stroke="var(--bar-prev)" strokeWidth={2} strokeDasharray="4 3" dot={false} animationDuration={150} />}
             </ComposedChart>
           </ResponsiveContainer>
         </div>
       </div>
 
-      <div className="card max-h-[60vh] overflow-auto">
+      <div className="card">
+        <div className="panel-heading"><div><h2>일자별 매출 내역</h2><p>전월 동일 일자 비교 · 백만원</p></div></div>
+        <div className="data-scroll">
         <table className="dtable">
           <thead>
             <tr>
@@ -150,6 +145,7 @@ export default function DailyChart({
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

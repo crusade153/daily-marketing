@@ -7,14 +7,11 @@ export const dynamic = 'force-dynamic';
 export default async function HierarchyPage() {
   const d = await getDashboard();
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-bold">계층별 손익</h1>
-        <p className="text-xs text-muted">
-          기본은 제품계층 LV1 › LV2 › LV3 › LV4 순서로 펼쳐 봅니다. 1~4차 축은 CM·카테고리·담당자로 바꿀 수 있습니다. 장려금·일반비는
-          제품계층 LV1로 입력한 월 금액을 그 안의 제품 매출 비중으로 나눠 붙여서, 어느 축으로 봐도 합계가 같습니다. 누계 기준은
-          입력값 × 진행률입니다. 제품코드 단위는 제품별 매출 화면에서 봅니다.
-        </p>
+    <div className="data-page">
+      <div className="page-intro">
+        <h1>계층별 손익</h1>
+        <p>제품계층·CM·담당자별 수익성을 비교합니다. 계층명을 선택하면 하위 단계가 표시됩니다.</p>
+        <details className="method-note"><summary>비용 배부 기준</summary><p>장려금·일반비는 제품계층 LV1 입력 금액을 제품별 매출 비중으로 배부합니다. 분석 축과 관계없이 합계는 동일하며, 누계에는 월 입력값 × 월 진행률을 적용합니다. 제품코드별 내역은 ‘제품별 매출’에서 확인할 수 있습니다.</p></details>
       </div>
       <Notices d={d} />
       <PnlPivot rows={d.rows} curYm={d.curYm} prevYm={d.prevYm} exportHref="/hierarchy/export" />

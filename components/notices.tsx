@@ -6,37 +6,17 @@ import type { DashboardData } from '@/lib/types';
 export default function Notices({ d }: { d: DashboardData }) {
   const { unitSales, rateSales, noneSales } = d.coverage;
   const total = unitSales + rateSales + noneSales;
-  const items: React.ReactNode[] = [];
   const { l1Total, curFilled, prevFilled } = d.inputStatus;
-
-  if (curFilled < l1Total || prevFilled < l1Total) {
-    items.push(
-      <>
-        장려금·일반비 입력: {monthLabel(d.curYm)} {curFilled}/{l1Total}개 LV1, {monthLabel(d.prevYm)} {prevFilled}/
-        {l1Total}개 LV1.{' '}
-        <Link href="/input" className="font-semibold underline">
-          입력하기
-        </Link>
-      </>,
-    );
-  }
-  if (total && rateSales + noneSales) {
-    items.push(
-      <>
-        당월 매출 중 {pct((rateSales + noneSales) / total)}({eok(rateSales + noneSales)})는 3개월 원가 이력이 없어 계층 원가율로
-        대체했습니다.
-      </>,
-    );
-  }
-  if (d.storage === 'local') {
-    items.push(<>SHEET_ID가 설정되지 않아 입력값을 로컬 파일(.data)에 저장 중입니다.</>);
-  }
-  if (!items.length) return null;
+  const missing = curFilled < l1Total || prevFilled < l1Total;
+  const replacement = total > 0 && rateSales + noneSales !== 0;
+  if (!missing && !replacement && d.storage !== 'local') return null;
   return (
-    <ul className="space-y-1 rounded-lg bg-[var(--warn-bg)] px-4 py-3 text-[13px] text-[var(--warn-text)]">
-      {items.map((it, i) => (
-        <li key={i}>· {it}</li>
-      ))}
-    </ul>
+    <div className="notice-bar" role="note" aria-label="데이터 확인 사항">
+      <span className="notice-label">확인 사항</span>
+      {missing && <span>장려금·일반비 입력 <b>{monthLabel(d.curYm)} {curFilled}/{l1Total}</b> · {monthLabel(d.prevYm)} {prevFilled}/{l1Total}개 계층</span>}
+      {replacement && <span>원가율 대체 적용 <b>{pct((rateSales + noneSales) / total)}</b> ({eok(rateSales + noneSales)})</span>}
+      {d.storage === 'local' && <span>입력값은 현재 개발 환경에 저장됩니다.</span>}
+      {missing && <Link href="/input" prefetch={false} className="notice-action">비용 입력 →</Link>}
+    </div>
   );
 }

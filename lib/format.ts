@@ -2,9 +2,9 @@ const nf0 = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 0 });
 const nf1 = new Intl.NumberFormat('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 /** 억원, 소수 1자리 */
-export const eok = (n: number) => `${nf1.format(n / 1e8)}억`;
+export const eok = (n: number) => `${nf1.format(Math.abs(n) < 5e6 ? 0 : n / 1e8)}억`;
 /** 백만원 정수 */
-export const mil = (n: number) => nf0.format(Math.round(n / 1e6));
+export const mil = (n: number) => nf0.format(Math.round(n / 1e6) || 0);
 /** 원 정수 */
 export const won = (n: number) => nf0.format(Math.round(n));
 export const pct = (r: number | null | undefined, digits = 1) =>

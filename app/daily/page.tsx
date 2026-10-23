@@ -8,9 +8,9 @@ export default async function DailyPage() {
   const { periods: p, daily } = await getDaily();
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-bold">일별 매출</h1>
-        <p className="text-xs text-muted">CO-PA 총매출(VV101) 기준. 전월은 같은 일자까지의 누계와 비교합니다.</p>
+      <div className="page-intro">
+        <h1>일별 매출</h1>
+        <p>일별 매출과 누계 흐름을 전월 동일 경과일 기준으로 비교합니다. 금액 단위: 백만원.</p>
       </div>
       <DailyChart daily={daily} curYm={p.curYm} prevYm={p.prevYm} daysInMonth={p.daysInMonth} prevDays={daysIn(p.prevYm)} />
     </div>

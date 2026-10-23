@@ -12,7 +12,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="ko">
       <body className="min-h-screen">
         <Nav />
-        <main className="mx-auto max-w-[1440px] px-4 py-5 md:px-6">{children}</main>
+        <main id="main-content" className="app-main">{children}</main>
       </body>
     </html>
   );

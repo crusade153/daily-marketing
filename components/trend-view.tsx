@@ -33,10 +33,11 @@ import {
   type TrendMetric,
 } from '@/lib/trend';
 import type { Amounts } from '@/lib/types';
+import AnalysisTabs from './analysis-tabs';
 
 const METRICS: TrendMetric[] = ['sales', 'gp', 'gpm', 'op', 'opm'];
-const ANIM = 350; // 최초 진입 애니메이션 (ms)
-const AXIS_TICK = { fontSize: 11, fill: 'var(--viz-axis)' };
+const ANIM = 150;
+const AXIS_TICK = { fontSize: 12, fill: 'var(--viz-axis)' };
 
 // 음수 부호는 하이픈 대신 '−'(U+2212) — 작은 글씨에서도 보이도록
 const minus = (s: string) => s.replace('-', '−');
@@ -150,14 +151,14 @@ export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[
             ))}
           </select>
         </label>
-        <div className="flex overflow-hidden rounded-md border border-border" role="group" aria-label="표 지표">
+        <div className="flex max-w-full overflow-x-auto rounded-md border border-border" role="group" aria-label="표 지표">
           {METRICS.map((m) => (
             <button
               key={m}
               type="button"
               aria-pressed={metric === m}
               onClick={() => setMetric(m)}
-              className={`px-3 py-1.5 ${metric === m ? 'bg-accent text-white' : 'hover:bg-surface-2'}`}
+              className={`shrink-0 whitespace-nowrap px-3 py-1.5 ${metric === m ? 'bg-accent text-white' : 'hover:bg-surface-2'}`}
             >
               {METRIC_LABEL[m]}
             </button>
@@ -177,12 +178,13 @@ export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[
         </span>
       </div>
 
-      {/* L1: 추이 */}
+      <AnalysisTabs label="월별 분석 보기" tabs={[
+      { label: '매출·이익률', content: (
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <section className="card px-4 py-3">
           <h2 className="text-sm font-bold">월별 매출 · {scopeLabel}</h2>
           <p className="mb-2 text-xs text-muted">단위: 억원. 연한 막대는 진행 중인 달의 월 예상</p>
-          <div className="h-[260px]">
+          <div className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartRows} margin={{ top: 22, right: 8, bottom: 0, left: 0 }} barCategoryGap="28%">
                 <CartesianGrid stroke="var(--viz-grid)" vertical={false} />
@@ -228,7 +230,7 @@ export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[
             단위: %. 장려금·일반비를 입력하지 않은 달은 영업이익률을 그리지 않습니다
             {fcstRow ? ` · ${fcstRow.label}은 예상` : ''}
           </p>
-          <div className="h-[260px]">
+          <div className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartRows} margin={{ top: 22, right: 16, bottom: 0, left: 0 }}>
                 <CartesianGrid stroke="var(--viz-grid)" vertical={false} />
@@ -264,8 +266,8 @@ export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[
           </div>
         </section>
       </div>
-
-      {/* L2: 전월 대비 차이 브리지 */}
+      ) },
+      { label: '전월 대비 변동', content: (
       <section className="card px-4 py-3">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <h2 className="text-sm font-bold">
@@ -289,8 +291,7 @@ export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[
             </select>
           </label>
           <span className="text-xs text-muted">
-            0에서 출발해 차이를 쌓은 막대입니다(파랑 증가 · 빨강 감소). 차이가 큰 8개 외에는 기타로 묶었고, 마지막 회색 막대가
-            전체 차이입니다 (억원)
+            파랑: 증가 · 빨강: 감소 · 회색: 전체 증감 / 상위 8개 외 기타 합산 (억원)
           </span>
         </div>
         {bridgeBlocked && (
@@ -355,20 +356,19 @@ export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[
           </div>
         )}
       </section>
-
-      {/* L3: 히트맵 표 */}
+      ) },
+      { label: '계층별 월간 현황', content: (
       <section className="card">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-4 py-3">
           <h2 className="text-sm font-bold">
             {AXIS_LABEL[axis]} × 월 · {METRIC_LABEL[metric]}
           </h2>
           <span className="text-xs text-muted">
-            {isRate(metric) ? '단위: %' : '단위: 백만원'} · 행을 누르면 위 차트가 그 행으로 바뀌고, 월 머리글을 누르면 브리지 기준월이
-            바뀝니다
+            {isRate(metric) ? '단위: %' : '단위: 백만원'} · 계층 선택 시 차트 범위 변경 · 월 선택 시 변동 분석 기준월 변경
           </span>
           <HeatLegend diverging={diverging} cap={cap} metric={metric} />
         </div>
-        <div className="max-h-[70vh] overflow-auto">
+        <div className="data-scroll">
           <table className="dtable">
             <thead>
               <tr>
@@ -449,6 +449,8 @@ export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[
           </table>
         </div>
       </section>
+      ) },
+      ]} />
     </div>
   );
 }

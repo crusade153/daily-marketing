@@ -1,7 +1,7 @@
 import { growth, mil, pct, ppt, signedMil, tone } from '@/lib/format';
 import { metrics, type Metrics } from '@/lib/pnl';
 import { monthLabel } from '@/lib/period';
-import type { Amounts } from '@/lib/types';
+import type { Amounts, DashboardData } from '@/lib/types';
 
 type Line = { label: string; get: (m: Metrics) => number | null; rate?: boolean; strong?: boolean; cost?: boolean };
 
@@ -21,20 +21,23 @@ export default function PnlStatement({
   total,
   curYm,
   prevYm,
+  inputStatus,
 }: {
   total: { mtd: Amounts; fcst: Amounts; prev: Amounts };
   curYm: string;
   prevYm: string;
+  inputStatus: DashboardData['inputStatus'];
 }) {
   const mtd = metrics(total.mtd);
   const fcst = metrics(total.fcst);
   const prev = metrics(total.prev);
   return (
-    <div className="card overflow-x-auto">
-      <div className="flex items-baseline justify-between px-4 pt-3 pb-2">
-        <h2 className="text-sm font-bold">손익 요약</h2>
-        <span className="text-xs text-muted">단위: 백만원</span>
+    <section className="card statement-panel">
+      <div className="panel-heading">
+        <div><h2>손익 요약</h2><p>당월 예상과 전월 실적 비교</p></div>
+        <span className="unit-label">백만원 · %</span>
       </div>
+      <div className="statement-table overflow-x-auto">
       <table className="dtable">
         <thead>
           <tr>
@@ -55,7 +58,7 @@ export default function PnlStatement({
             const diff = l.rate ? ppt(f, p) : f != null && p != null ? signedMil(f - p) : '-';
             const diffNum = f != null && p != null ? (l.cost ? p - f : f - p) : null;
             return (
-              <tr key={l.label} className={l.strong ? 'font-semibold' : l.rate ? 'text-muted' : ''}>
+              <tr key={l.label} className={l.strong ? 'statement-key' : l.rate ? 'statement-rate text-muted' : ''}>
                 <td className={l.rate ? 'pl-6' : ''}>{l.label}</td>
                 <td className="num">{fmt(a)}</td>
                 <td className="num bg-accent-soft/40">{fmt(f)}</td>
@@ -67,6 +70,8 @@ export default function PnlStatement({
           })}
         </tbody>
       </table>
-    </div>
+      </div>
+      <div className="panel-footer"><span>{inputStatus.curFilled < inputStatus.l1Total ? `장려금·일반비 ${inputStatus.curFilled}/${inputStatus.l1Total}개 계층 반영` : '장려금·일반비 입력 완료'}</span><span>전월 대비: 월 전체 기준</span></div>
+    </section>
   );
 }

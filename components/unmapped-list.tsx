@@ -57,11 +57,11 @@ export default function UnmappedList({ items }: { items: UnmappedItem[] }) {
           </button>
         </div>
       </div>
-      <div className="max-h-[60vh] overflow-auto">
+      <div className="data-scroll">
         <table className="dtable">
           <thead>
             <tr>
-              <th className="text-left">MATNR</th>
+              <th className="text-left">제품코드</th>
               <th className="text-left">제품명</th>
               <th className="text-left">제품계층 LV1</th>
               <th className="text-left">제품계층 LV2</th>
