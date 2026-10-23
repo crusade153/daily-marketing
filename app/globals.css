@@ -1,26 +1,93 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f1f3f6;
+  --border: #e3e6eb;
+  --text: #1b1f24;
+  --muted: #6b7280;
+  --accent: #2557d6;
+  --accent-soft: #e8eefc;
+  --pos: #0f7b4f;
+  --neg: #c2362f;
+  --warn-bg: #fff6e0;
+  --warn-text: #8a5a00;
+  --bar-cur: #2557d6;
+  --bar-prev: #a7b3c7;
+  --input-bg: #fffdf2;
+  /* 차트 (dataviz 기본 팔레트, validate_palette.js 통과) */
+  --viz-1: #2a78d6; /* 계열 1 · 증가 */
+  --viz-2: #eb6834; /* 계열 2 */
+  --viz-down: #e34948; /* 감소 */
+  --viz-total: #52514e; /* 합계 막대 */
+  --viz-grid: #e1e0d9;
+  --viz-axis: #898781;
+  --viz-mid: #f0efec; /* 발산 척도 중앙(0) */
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-pos: var(--pos);
+  --color-neg: var(--neg);
+  --font-sans: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+table.dtable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+table.dtable th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-weight: 600;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+table.dtable td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+table.dtable tr.subtotal td {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+table.dtable tr.total td {
+  background: var(--accent-soft);
+  font-weight: 700;
+}
+table.dtable tbody tr:hover td {
+  background-color: #f7f9fc;
 }

@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 로컬 입력 저장소 (SHEET_ID 미설정 시)
+/.data
+
+# 로컬 실행 설정 및 내부 실적·계정 정보가 포함된 작업 메모
+/.claude/
+/progress.md

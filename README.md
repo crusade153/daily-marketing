@@ -1,5 +1,9 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Git 커밋·푸시
+
+VS Code의 PowerShell 터미널에서 실행할 명령어 순서는 [GIT_GUIDE.md](./GIT_GUIDE.md)를 참고하세요.
+
 ## Getting Started
 
 First, run the development server:
