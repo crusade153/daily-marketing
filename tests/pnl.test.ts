@@ -5,6 +5,7 @@ import {
   allocate,
   buildMonthRows,
   buildRows,
+  cmOf,
   estimateCogs,
   costRates,
   forecastFactor,
@@ -83,6 +84,15 @@ test('매출원가: 3개월 단위원가 × 당월 수량, 이력 없으면 계�
   assert.deepEqual(estimateCogs(b, rates), { cogs: 500, method: 'rate' }); // A1 원가율 0.5
 });
 
+test('CM: 표시한 열 이름, X·빈칸은 미소속, 둘 이상이면 중복', () => {
+  const m = (cm1: string, cm2: string, cm3: string) => ({ matnr: 'a', name: 'n', cm1, cm2, cm3, category: '', owner: '' });
+  assert.equal(cmOf(m('O', '', '')), 'CM1');
+  assert.equal(cmOf(m('X', 'x', 'v')), 'CM3');
+  assert.equal(cmOf(m('', '', '')), '(미매핑)');
+  assert.equal(cmOf(undefined), '(미매핑)');
+  assert.equal(cmOf(m('O', 'O', '')), '(CM 중복)');
+});
+
 test('배분: 양(+)의 매출 비중, 가중치 없으면 null', () => {
   assert.deepEqual(allocate(100, [30, 70, -10]), [30, 70, 0]);
   assert.equal(allocate(100, [0, -5]), null);
@@ -96,7 +106,7 @@ test('buildRows: LV1 입력을 LV1 안 제품 매출 비중으로 배부, 예상
   ];
   const rows = buildRows({
     facts,
-    maps: [{ matnr: 'a', name: 'n', cm1: 'X', cm2: '', cm3: '', category: '', owner: '홍길동' }],
+    maps: [{ matnr: 'a', name: 'n', cm1: '', cm2: 'O', cm3: '', category: '', owner: '홍길동' }],
     curInputs: [input('202610', 'A', 40, 20), input('202610', 'ZZ', 7, 3)],
     prevInputs: [input('202609', 'A', 50, 10)],
     elapsed: 10,
@@ -117,7 +127,8 @@ test('buildRows: LV1 입력을 LV1 안 제품 매출 비중으로 배부, 예상
   assert.equal(a.prev.qty, 9);
   assert.equal(unitPrice(a.mtd), 100);
   assert.equal(unitPrice({ sales: 100, qty: 0 }), null);
-  assert.equal(rows.find((r) => r.matnr === 'b')!.cm1, '(미매핑)');
+  assert.equal(a.cm, 'CM2');
+  assert.equal(rows.find((r) => r.matnr === 'b')!.cm, '(미매핑)');
   assert.ok(rows.some((r) => r.matnr === 'L1:ZZ'));
   // LV2로 묶어도 LV1 입력 합계 보존
   const byL2 = groupBy(rows, 'l2');
@@ -155,9 +166,7 @@ test('월별 추이: 축별 합계 = 전체, 브리지 막대 합 = 전체 차�
     matnr: l1,
     name: l1,
     ...H(l1, `${l1}1`),
-    cm1: '',
-    cm2: '',
-    cm3: '',
+    cm: '',
     category: '',
     owner: '',
     amt: { sales, qty: 0, cogs, incentive: 0, general: 0 },

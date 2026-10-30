@@ -114,7 +114,20 @@ export function allocate(total: number, weights: number[]): number[] | null {
 }
 
 const UNMAPPED = '(미매핑)';
+export const CM_DUPLICATE = '(CM 중복)';
 export const ORPHAN_NAME = '(매출 없음 · 입력 비용)';
+
+/** 소속이 아님을 뜻하는 표시. 빈칸도 미소속 */
+const NOT_MARKED = new Set(['X', 'x', '×', 'N', 'n', '0', '-']);
+
+/** 시트 CM1~CM3 열 중 표시가 된 열 이름. 없으면 미매핑, 둘 이상이면 중복 */
+export function cmOf(m: ProductMap | undefined): string {
+  if (!m) return UNMAPPED;
+  const marked = (['cm1', 'cm2', 'cm3'] as const).filter((k) => m[k] && !NOT_MARKED.has(m[k]));
+  if (marked.length === 0) return UNMAPPED;
+  if (marked.length > 1) return CM_DUPLICATE;
+  return marked[0].toUpperCase();
+}
 
 function dimsOf(f: Hierarchy & { matnr: string; name: string }, m: ProductMap | undefined): RowDims {
   return {
@@ -128,9 +141,7 @@ function dimsOf(f: Hierarchy & { matnr: string; name: string }, m: ProductMap | 
     l3t: f.l3t,
     l4: f.l4,
     l4t: f.l4t,
-    cm1: m?.cm1 || UNMAPPED,
-    cm2: m?.cm2 || UNMAPPED,
-    cm3: m?.cm3 || UNMAPPED,
+    cm: cmOf(m),
     category: m?.category || UNMAPPED,
     owner: m?.owner || UNMAPPED,
   };
@@ -150,9 +161,7 @@ function orphanDims(inp: ManualInput): RowDims {
     l3t: ORPHAN_NAME,
     l4: code,
     l4t: ORPHAN_NAME,
-    cm1: UNMAPPED,
-    cm2: UNMAPPED,
-    cm3: UNMAPPED,
+    cm: UNMAPPED,
     category: UNMAPPED,
     owner: UNMAPPED,
   };
@@ -291,16 +300,14 @@ export function buildMonthRows(params: {
 }
 
 /** 분석 축. 제품계층은 코드로 묶고 이름으로 보여준다 (이름이 같은 다른 계층이 섞이지 않도록) */
-export type Axis = 'l1' | 'l2' | 'l3' | 'l4' | 'cm1' | 'cm2' | 'cm3' | 'category' | 'owner' | 'name';
+export type Axis = 'l1' | 'l2' | 'l3' | 'l4' | 'cm' | 'category' | 'owner' | 'name';
 
 export const AXIS_LABEL: Record<Axis, string> = {
   l1: '제품계층 LV1',
   l2: '제품계층 LV2',
   l3: '제품계층 LV3',
   l4: '제품계층 LV4',
-  cm1: 'CM1',
-  cm2: 'CM2',
-  cm3: 'CM3',
+  cm: 'CM',
   category: '카테고리',
   owner: '담당자',
   name: '제품',

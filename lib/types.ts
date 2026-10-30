@@ -65,6 +65,7 @@ export interface Amounts {
 export interface ProductMap {
   matnr: string;
   name: string;
+  /** CM1~CM3: 소속 열에 O 등 표시 (빈칸·X는 미소속) */
   cm1: string;
   cm2: string;
   cm3: string;
@@ -87,9 +88,8 @@ export interface ManualInput {
 export interface RowDims extends Hierarchy {
   matnr: string;
   name: string;
-  cm1: string;
-  cm2: string;
-  cm3: string;
+  /** 시트 CM1~CM3 중 표시한 열 이름 */
+  cm: string;
   category: string;
   owner: string;
 }

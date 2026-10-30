@@ -20,9 +20,7 @@ const DIM_COLS: { header: string; get: (r: RowDims) => string; width: number }[]
   { header: '제품계층 LV3', get: (r) => r.l3t, width: 20 },
   { header: 'LV4코드', get: (r) => r.l4, width: 20 },
   { header: '제품계층 LV4', get: (r) => r.l4t, width: 16 },
-  { header: 'CM1', get: (r) => r.cm1, width: 10 },
-  { header: 'CM2', get: (r) => r.cm2, width: 10 },
-  { header: 'CM3', get: (r) => r.cm3, width: 10 },
+  { header: 'CM', get: (r) => r.cm, width: 10 },
   { header: '카테고리', get: (r) => r.category, width: 10 },
   { header: '담당자', get: (r) => r.owner, width: 10 },
 ];

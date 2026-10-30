@@ -7,7 +7,7 @@ import { monthLabel } from '@/lib/period';
 import { SCENARIO_LABEL, type MaterialRow, type Scenario } from '@/lib/types';
 
 // 제품 단위는 '제품별 매출' 화면에서 본다
-const AXES: Axis[] = ['l1', 'l2', 'l3', 'l4', 'cm1', 'cm2', 'cm3', 'category', 'owner'];
+const AXES: Axis[] = ['l1', 'l2', 'l3', 'l4', 'cm', 'category', 'owner'];
 const HIER: Axis[] = ['l1', 'l2', 'l3', 'l4'];
 const DEPTH = 4;
 type Slot = Axis | 'none';
@@ -74,7 +74,7 @@ export default function PnlPivot({
     const q = query.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((r) =>
-      [r.name, r.matnr, r.l1t, r.l2t, r.l3t, r.l4t, r.cm1, r.cm2, r.cm3, r.category, r.owner].some((v) =>
+      [r.name, r.matnr, r.l1t, r.l2t, r.l3t, r.l4t, r.cm, r.category, r.owner].some((v) =>
         v.toLowerCase().includes(q),
       ),
     );

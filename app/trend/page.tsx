@@ -5,7 +5,7 @@ import type { Axis } from '@/lib/pnl';
 export const dynamic = 'force-dynamic';
 
 // 제품 축은 행이 1,700개가 넘어 월별 표로는 읽을 수 없어 뺀다 (제품별 매출 화면에서 본다)
-const AXES: Axis[] = ['l1', 'l2', 'l3', 'l4', 'cm1', 'cm2', 'cm3', 'category', 'owner'];
+const AXES: Axis[] = ['l1', 'l2', 'l3', 'l4', 'cm', 'category', 'owner'];
 
 export default async function TrendPage({
   searchParams,
