@@ -47,11 +47,13 @@ const ChannelSaveInput = z.object({
   ym: z.string().regex(/^\d{6}$/),
   user: z.string().trim().max(40),
   entries: z
-    .array(z.object({ ch: z.string().min(1).max(20), cht: z.string().max(80), incentive: Amount, general: Amount }))
+    .array(
+      z.object({ ch: z.string().min(1).max(20), cht: z.string().max(80), incentive: Amount, general: Amount, rate: z.number().finite().min(-100).max(100) }),
+    )
     .max(500),
 });
 
-/** 장려금·일반비 고객그룹3 입력 저장. (YYYYMM, 고객그룹3) 기준 upsert. 열 순서는 TABS.channelInput (일반비가 끝) */
+/** 장려금·일반비 고객그룹3 입력 저장. (YYYYMM, 고객그룹3) 기준 upsert. 열 순서는 TABS.channelInput (고정비·변동비율이 끝) */
 export async function saveChannelInputs(input: unknown): Promise<SaveResult> {
   const parsed = ChannelSaveInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: '입력값 형식이 올바르지 않습니다.' };
@@ -60,7 +62,7 @@ export async function saveChannelInputs(input: unknown): Promise<SaveResult> {
   try {
     return await upsert(
       TABS.channelInput,
-      entries.map((e) => [ym, e.ch, e.cht, Math.round(e.incentive), at, user || '-', Math.round(e.general)]),
+      entries.map((e) => [ym, e.ch, e.cht, Math.round(e.incentive), at, user || '-', Math.round(e.general), Math.round(e.rate * 1000) / 1000]),
       (v) => cellKey(v[0], v[1]),
       true,
     );

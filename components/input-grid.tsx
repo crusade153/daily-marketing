@@ -18,7 +18,8 @@ export interface SavedInput {
   ym: string;
   key: string;
   incentive: number;
-  general: number;
+  general: number; // 일반비 고정비 (원)
+  rate: number; // 일반비 변동비율 (%)
   updatedAt: string;
   updatedBy: string;
 }
@@ -28,9 +29,11 @@ export interface InputMonth {
   kind: 'actual' | 'fcst';
 }
 
-type Field = 'incentive' | 'general';
-const FIELD_LABEL: Record<Field, string> = { incentive: '장려금', general: '일반비' };
-const FIELDS: Field[] = ['incentive', 'general'];
+// 장려금·고정비는 금액(입력 단위 적용), 변동비율은 % 그대로
+type Field = 'incentive' | 'general' | 'rate';
+const FIELD_LABEL: Record<Field, string> = { incentive: '장려금', general: '일반비 고정비', rate: '일반비 변동비율' };
+const FIELDS: Field[] = ['incentive', 'general', 'rate'];
+const isAmount = (f: Field) => f !== 'rate';
 const UNITS = [
   { v: 1, label: '원' },
   { v: 1e3, label: '천원' },
@@ -98,7 +101,7 @@ export default function InputGrid({
   // 월별 입력 완료 LV1 수 (버튼 표시용)
   const filledBy = useMemo(() => {
     const m = new Map<string, number>();
-    for (const i of inputs) if (i.incentive || i.general) m.set(i.ym, (m.get(i.ym) ?? 0) + 1);
+    for (const i of inputs) if (i.incentive || i.general || i.rate) m.set(i.ym, (m.get(i.ym) ?? 0) + 1);
     return m;
   }, [inputs]);
 
@@ -110,7 +113,7 @@ export default function InputGrid({
       const s = buf[key(l1, f)];
       if (s === undefined) return baseValue(l1, f);
       const n = parse(s);
-      return n == null ? null : n * unit;
+      return n == null ? null : isAmount(f) ? n * unit : n;
     },
     [buf, baseValue, unit],
   );
@@ -150,6 +153,7 @@ export default function InputGrid({
           cht: it.label,
           incentive: valueOf(it.key, 'incentive') ?? 0,
           general: valueOf(it.key, 'general') ?? 0,
+          rate: valueOf(it.key, 'rate') ?? 0,
         })),
       });
       if (res.ok) {
@@ -240,8 +244,10 @@ export default function InputGrid({
       sales: s.sales + refSales(it),
       incentive: s.incentive + (valueOf(it.key, 'incentive') ?? 0),
       general: s.general + (valueOf(it.key, 'general') ?? 0),
+      // 변동비 = 매출 × 변동비율
+      rate: s.rate + (refSales(it) * (valueOf(it.key, 'rate') ?? 0)) / 100,
     }),
-    { sales: 0, incentive: 0, general: 0 },
+    { sales: 0, incentive: 0, general: 0, rate: 0 },
   );
   const unitLabel = UNITS.find((u) => u.v === unit)?.label;
 
@@ -315,7 +321,7 @@ export default function InputGrid({
         {isFcst
           ? '진행 중인 달은 월 전체 예상 금액을 입력합니다. 누계 손익에는 진행률만큼 반영됩니다.'
           : '마감된 달은 확정된 실적 금액을 입력합니다.'}{' '}
-        입력한 금액은 그 달 그 고객그룹3의 제품별 총매출 비중으로 제품에 배부됩니다. 장려금·일반비 두 열은 엑셀에서 복사해 첫 칸에 붙여넣을 수 있습니다.
+        장려금·일반비 고정비(금액)는 그 달 그 고객그룹3의 제품별 총매출 비중으로 배부되고, 일반비 변동비율(%)은 각 제품의 총매출 × 비율로 자동 계산됩니다{isFcst ? ' (예상 손익은 예상 매출 기준, 아래 변동비는 누계 매출 기준 참고값)' : ''}. 세 열은 엑셀에서 복사해 첫 칸에 붙여넣을 수 있습니다.
       </p>
 
       <div className="card data-scroll">
@@ -327,8 +333,8 @@ export default function InputGrid({
               <th className="num">{isFcst ? '누계 매출' : '실적 매출'} (백만원)</th>
               {FIELDS.map((f) => (
                 <Fragment key={f}>
-                  <th className="num">{FIELD_LABEL[f]} ({unitLabel})</th>
-                  <th className="num">{FIELD_LABEL[f]}율</th>
+                  <th className="num">{FIELD_LABEL[f]} ({isAmount(f) ? unitLabel : '%'})</th>
+                  <th className="num">{isAmount(f) ? `${FIELD_LABEL[f]}율` : '변동비 (백만원)'}</th>
                 </Fragment>
               ))}
               <th className="text-left">최종 수정</th>
@@ -340,8 +346,8 @@ export default function InputGrid({
               <td className="num">{mil(total.sales)}</td>
               {FIELDS.map((f) => (
                 <Fragment key={f}>
-                  <td className="num">{fmt.format(total[f] / unit)}</td>
-                  <td className="num">{pct(total.sales ? total[f] / total.sales : null)}</td>
+                  <td className="num">{isAmount(f) ? fmt.format(total[f] / unit) : pct(total.sales ? total.rate / total.sales : null)}</td>
+                  <td className="num">{isAmount(f) ? pct(total.sales ? total[f] / total.sales : null) : mil(total.rate)}</td>
                 </Fragment>
               ))}
               <td />
@@ -357,7 +363,8 @@ export default function InputGrid({
                   {FIELDS.map((f, c) => {
                     const k = key(it.key, f);
                     const v = valueOf(it.key, f);
-                    const shown = buf[k] ?? (baseValue(it.key, f) ? fmt.format(baseValue(it.key, f) / unit) : '');
+                    const b = baseValue(it.key, f);
+                    const shown = buf[k] ?? (b ? fmt.format(isAmount(f) ? b / unit : b) : '');
                     return (
                       <Fragment key={f}>
                         <td className="p-1">
@@ -376,7 +383,7 @@ export default function InputGrid({
                             }`}
                           />
                         </td>
-                        <td className="num text-muted">{pct(sales && v != null ? v / sales : null)}</td>
+                        <td className="num text-muted">{isAmount(f) ? pct(sales && v != null ? v / sales : null) : v ? mil((sales * v) / 100) : ''}</td>
                       </Fragment>
                     );
                   })}

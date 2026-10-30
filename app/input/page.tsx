@@ -59,6 +59,7 @@ export default async function InputPage({
       key: c.ch,
       incentive: c.incentive,
       general: c.general,
+      rate: c.rate,
       updatedAt: c.updatedAt,
       updatedBy: c.updatedBy,
     }));
@@ -72,11 +73,11 @@ export default async function InputPage({
         <p>
           {isTarget
             ? '제품별 월 목표(매출·GP·OP)는 구글 시트에서 입력합니다. 입력한 목표는 제품별 손익 분석의 목표·목표비에 반영됩니다.'
-            : '고객그룹3(채널)별 월 장려금·일반비 금액을 입력합니다. 그 채널의 제품별 총매출 비중으로 각 제품에 배부됩니다.'}
+            : '고객그룹3(채널)별 월 장려금·일반비를 입력합니다. 장려금·일반비 고정비는 금액(채널 제품 총매출 비중으로 배부), 일반비 변동비는 총매출 대비 %로 자동 계산됩니다.'}
           {d.storage === 'local' && ' 현재 입력값은 개발 환경에 저장됩니다.'}
         </p>
         {!isTarget && (
-          <details className="method-note"><summary>입력 및 저장 안내</summary><p>월별 숫자는 입력 완료 채널 수 / 매출 발생 채널 수입니다. 저장 시 선택한 월·채널의 기존 금액을 갱신합니다. 마감월은 실적 비용, 당월은 월 전체 예상 비용을 입력합니다(누계 손익에는 월 진행률만큼 반영). 순매출 = 총매출 − 장려금, 매출총이익 = 순매출 − 매출원가, 영업이익 = 매출총이익 − 일반비. 그 달 매출이 없는 채널의 금액은 ‘(채널 비용)’ 행에 따로 모입니다.</p></details>
+          <details className="method-note"><summary>입력 및 저장 안내</summary><p>월별 숫자는 입력 완료 채널 수 / 매출 발생 채널 수입니다. 저장 시 선택한 월·채널의 기존 금액을 갱신합니다. 마감월은 실적 비용, 당월은 월 전체 예상 비용을 입력합니다(누계 손익에는 월 진행률만큼 반영). 일반비 = 고정비(금액 배부) + 변동비(각 제품 총매출 × 변동비율, 누계·예상·마감월 각각의 매출 기준). 순매출 = 총매출 − 장려금, 매출총이익 = 순매출 − 매출원가, 영업이익 = 매출총이익 − 일반비. 그 달 매출이 없는 채널의 금액은 ‘(채널 비용)’ 행에 따로 모입니다.</p></details>
         )}
       </div>
       <nav className="view-switch" aria-label="입력 종류">

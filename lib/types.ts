@@ -93,13 +93,17 @@ export interface ChannelOwner {
   updatedBy: string;
 }
 
-/** 장려금·일반비 수기 입력: 고객그룹3(채널) × 월 전체 금액(원). 그 채널 제품 총매출 비중으로 배부 */
+/**
+ * 장려금·일반비 수기 입력: 고객그룹3(채널) × 월.
+ * 장려금·일반비 고정비 = 월 전체 금액(원), 그 채널 제품 총매출 비중으로 배부. 변동비율 = 총매출 대비 %
+ */
 export interface ChannelInput {
   ym: string;
   ch: string; // KVGR3
   cht: string; // KVGR3_T
   incentive: number;
-  general: number;
+  general: number; // 일반비 고정비 (금액)
+  rate: number; // 일반비 변동비율 (%, 예: 3.5 = 총매출의 3.5%)
   updatedAt: string;
   updatedBy: string;
 }

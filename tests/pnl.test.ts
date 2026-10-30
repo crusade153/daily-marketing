@@ -51,12 +51,13 @@ const fact = (o: Partial<MaterialFact>): MaterialFact => ({
 });
 
 const cf = (matnr: string, ch: string, sales: number, qty = 0, cogs = 0): ChannelFact => ({ matnr, ch, cht: `채널${ch}`, sales, qty, cogs });
-const ci = (ym: string, ch: string, incentive: number, general: number): ChannelInput => ({
+const ci = (ym: string, ch: string, incentive: number, general: number, rate = 0): ChannelInput => ({
   ym,
   ch,
   cht: `채널${ch}`,
   incentive,
   general,
+  rate,
   updatedAt: '',
   updatedBy: '',
 });
@@ -166,6 +167,32 @@ test('buildRows: 제품 × 채널 행, 채널 비용은 채널 안 제품 총매
   assert.equal(m.net, 1000 - 50);
   assert.equal(m.gp, 950 - 450);
   assert.equal(m.op, 500 - 10);
+});
+
+test('일반비 변동비: 채널 변동비율(%) × 각 행 총매출 (누계·예상·전월 각각), 고정비와 합산', () => {
+  const facts = [fact({ matnr: 'a', costQty: 10, costCogs: 500, costSales: 1000 }), fact({ matnr: 'b', costQty: 10, costCogs: 500, costSales: 1000 })];
+  const rows = buildRows({
+    facts,
+    cur: [cf('a', 'E', 300, 3), cf('b', 'E', 100, 1), cf('a', 'C', 200, 2)],
+    prev: [cf('a', 'E', 1000, 10, 400)],
+    maps: [],
+    reps: new Map(),
+    curInputs: [ci('202610', 'E', 0, 40, 2.5)], // 고정비 40 + 변동비 2.5%
+    prevInputs: [ci('202609', 'E', 0, 0, 10)],
+    elapsed: 10,
+    daysInMonth: 31,
+  });
+  const aE = rows.find((r) => r.matnr === 'a' && r.ch === 'E')!;
+  const aC = rows.find((r) => r.matnr === 'a' && r.ch === 'C')!;
+  assert.ok(Math.abs(aE.fcst.general - (30 + 300 * 3.1 * 0.025)) < 1e-9); // 고정비 300/400 × 40 + 예상 매출 × 2.5%
+  assert.ok(Math.abs(aE.mtd.general - (30 * (10 / 31) + 300 * 0.025)) < 1e-9); // 누계: 고정비 × 진행률 + 누계 매출 × 2.5%
+  assert.equal(aE.prev.general, 100); // 전월 매출 1000 × 10%
+  assert.equal(aC.fcst.general, 0); // 다른 채널은 영향 없음
+  const t = totalOf(rows);
+  assert.ok(Math.abs(t.fcst.general - (40 + 400 * 3.1 * 0.025)) < 1e-9);
+  // 마감월도 같은 방식
+  const month = buildMonthRows({ facts: [cf('a', 'E', 200, 2, 100)], dims: new Map(), maps: [], reps: new Map(), inputs: [ci('202608', 'E', 0, 10, 5)] });
+  assert.equal(month[0].amt.general, 10 + 200 * 0.05);
 });
 
 test('마감월: 제품 × 채널 실적 + 그 달 채널 입력 배부, 매출 없는 채널은 보관 행', () => {

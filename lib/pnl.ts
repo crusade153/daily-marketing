@@ -4,8 +4,9 @@
 //   영업이익(OP) = GP − 일반비.   GP율·OP율의 분모는 순매출 (2026-10-30 사용자 결정)
 //   당월 매출원가 = 당월 수량 × 최근 3개월 평균 단위원가 (이력이 없으면 LV2 → LV1 → 전사 원가율 × 매출)
 //   당월 예상 = 당월 누계 ÷ 진행일 × 월 일수
-//   장려금·일반비 입력값 = 고객그룹3(채널)의 월 전체 금액. 예상에는 그대로, 누계에는 × 진행률.
+//   장려금·일반비(고정비) 입력값 = 고객그룹3(채널)의 월 전체 금액. 예상에는 그대로, 누계에는 × 진행률.
 //     채널 안에서는 제품 총매출 비중으로 배분 → CM·PM·제품라인·제품 등 어느 축으로 묶어도 합계가 같다.
+//   일반비(변동비) = 채널 변동비율(%) × 각 행 총매출 (누계·예상·전월 각각의 매출). 일반비 = 고정비 + 변동비
 //   마감월(올해 1월 ~ 전월) = CO-PA 실적 매출·실제원가 + 그 달 채널 입력값
 import type {
   Amounts,
@@ -259,14 +260,15 @@ function channelOrphanDims(inp: Pick<ChannelInput, 'ch' | 'cht'>, reps: Map<stri
 }
 
 /**
- * 채널 입력 금액(장려금·일반비)을 그 채널 행들의 매출 비중으로 나눠 add로 넘긴다.
- * 매출이 없는 채널은 extra의 채널별 보관 행으로.
+ * 채널 입력 금액(장려금·일반비 고정비)을 그 채널 행들의 매출 비중으로 나눠 add로 넘긴다.
+ * 매출이 없는 채널은 extra의 채널별 보관 행으로. 변동비율은 채널의 모든 행에 addRate(행, 비율)로 넘긴다.
  */
 function spreadChannelInputs<R extends RowDims>(
   rows: R[],
   inputs: ChannelInput[],
   weight: (r: R) => number,
   add: (r: R, incentive: number, general: number) => void,
+  addRate: (r: R, rate: number) => void,
   extra: Map<string, R>,
   make: (d: RowDims) => R,
   reps: Map<string, string>,
@@ -278,8 +280,9 @@ function spreadChannelInputs<R extends RowDims>(
     else byCh.set(r.ch, [r]);
   }
   for (const inp of inputs) {
-    if (!inp.incentive && !inp.general) continue;
     const list = byCh.get(inp.ch) ?? [];
+    if (inp.rate) for (const r of list) addRate(r, inp.rate / 100);
+    if (!inp.incentive && !inp.general) continue;
     const w = list.map(weight);
     const inc = allocate(inp.incentive, w);
     const gen = allocate(inp.general, w);
@@ -360,6 +363,10 @@ export function buildRows(params: {
       r.mtd.incentive += inc * progress;
       r.mtd.general += gen * progress;
     },
+    (r, rate) => {
+      r.fcst.general += r.fcst.sales * rate;
+      r.mtd.general += r.mtd.sales * rate;
+    },
     extra,
     make,
     reps,
@@ -371,6 +378,9 @@ export function buildRows(params: {
     (r, inc, gen) => {
       r.prev.incentive += inc;
       r.prev.general += gen;
+    },
+    (r, rate) => {
+      r.prev.general += r.prev.sales * rate;
     },
     extra,
     make,
@@ -403,6 +413,9 @@ export function buildMonthRows(params: {
     (r, inc, gen) => {
       r.amt.incentive += inc;
       r.amt.general += gen;
+    },
+    (r, rate) => {
+      r.amt.general += r.amt.sales * rate;
     },
     extra,
     (d) => ({ ...d, amt: { ...ZERO } }),

@@ -382,7 +382,7 @@ async function getRepMap(): Promise<Map<string, string>> {
 }
 
 async function readChannelInputs(): Promise<ChannelInput[]> {
-  // 열: YYYYMM · 고객그룹3 · 고객그룹3명 · 장려금 · 수정일시 · 수정자 · 일반비 (일반비는 뒤에 추가된 열)
+  // 열: YYYYMM · 고객그룹3 · 고객그룹3명 · 장려금 · 수정일시 · 수정자 · 일반비 고정비 · 일반비 변동비율(%) (뒤 두 열은 나중에 추가)
   const rows = await getStore().read(TABS.channelInput);
   return rows
     .map(({ values: v }) => ({
@@ -393,10 +393,11 @@ async function readChannelInputs(): Promise<ChannelInput[]> {
       updatedAt: toStr(v[4]),
       updatedBy: toStr(v[5]),
       general: toNum(v[6]),
+      rate: toNum(v[7]),
     }))
     .filter((c) => c.ym && c.ch);
 }
-export const getChannelInputs = unstable_cache(readChannelInputs, ['manual-input-channel-v2'], { revalidate: 300, tags: ['manual'] });
+export const getChannelInputs = unstable_cache(readChannelInputs, ['manual-input-channel-v3'], { revalidate: 300, tags: ['manual'] });
 
 async function readTargets(): Promise<Target[]> {
   const rows = await getStore().read(TABS.target);
@@ -439,7 +440,7 @@ export async function getFacts(today?: string) {
   return { periods: p, facts: await cachedMaterials(p.today) };
 }
 
-const filledCount = (inputs: ChannelInput[], ym: string) => inputs.filter((i) => i.ym === ym && (i.incentive || i.general)).length;
+const filledCount = (inputs: ChannelInput[], ym: string) => inputs.filter((i) => i.ym === ym && (i.incentive || i.general || i.rate)).length;
 const channelCount = (rows: { ch: string; name: string }[], sales: (r: { ch: string; name: string }) => number) =>
   new Set(rows.filter((r) => r.name !== ORPHAN_NAME && sales(r)).map((r) => r.ch)).size;
 
