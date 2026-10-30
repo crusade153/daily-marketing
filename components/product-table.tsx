@@ -7,7 +7,15 @@ import { monthLabel } from '@/lib/period';
 import { SCENARIO_LABEL, type MaterialRow, type Scenario } from '@/lib/types';
 
 const PAGE = 200;
-const KEY_COLS = new Set(['matnr', 'name', 'l1', 'qty', 'price', 'sales', 'gp', 'gpm', 'growth', 'pprice', 'pchg']);
+const KEY_COLS = new Set(['matnr', 'name', 'cm', 'owner', 'l1', 'qty', 'price', 'sales', 'gp', 'gpm', 'growth', 'pprice', 'pchg']);
+const TEXT_COLS = ['matnr', 'name', 'cm', 'owner', 'category', 'l1', 'l2', 'l3', 'l4'];
+const MOBILE_SORTS = [
+  { id: 'sales', label: '매출순' },
+  { id: 'gp', label: 'GP순' },
+  { id: 'op', label: 'OP순' },
+  { id: 'growth', label: '매출 증감순' },
+  { id: 'price', label: '판매단가순' },
+];
 const qtyFmt = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 0 });
 
 interface Ctx {
@@ -33,9 +41,12 @@ const priceChg = (c: Ctx) => (c.price != null && c.prevPrice ? c.price / c.prevP
 const COLS: Col[] = [
   { id: 'matnr', label: '제품코드', sort: (r) => r.matnr, cell: (r) => r.matnr },
   { id: 'name', label: '제품명', sort: (r) => r.name, cell: (r) => r.name },
-  { id: 'l1', label: 'LV1', sort: (r) => r.l1t, cell: (r) => r.l1t },
+  { id: 'cm', label: 'CM', sort: (r) => r.cm, cell: (r) => r.cm },
+  { id: 'owner', label: 'PM', sort: (r) => r.owner, cell: (r) => r.owner },
+  { id: 'category', label: '제품라인', sort: (r) => r.category, cell: (r) => r.category },
+  { id: 'l3', label: '품목(LV3)', sort: (r) => r.l3t, cell: (r) => r.l3t },
+  { id: 'l1', label: '브랜드', sort: (r) => r.l1t, cell: (r) => r.l1t },
   { id: 'l2', label: 'LV2', sort: (r) => r.l2t, cell: (r) => r.l2t },
-  { id: 'l3', label: 'LV3', sort: (r) => r.l3t, cell: (r) => r.l3t },
   { id: 'l4', label: 'LV4', sort: (r) => r.l4t, cell: (r) => r.l4t },
   { id: 'qty', label: '수량(EA)', num: true, sort: (_, c) => c.m.qty, cell: (_, c) => qtyFmt.format(c.m.qty) },
   {
@@ -115,10 +126,10 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
 
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const col = COLS.find((c) => c.id === sort.id) ?? COLS[8];
+    const col = COLS.find((c) => c.id === sort.id) ?? COLS.find((c) => c.id === 'sales')!;
     const withCtx = rows
       .filter((r) => !l1 || r.l1 === l1)
-      .filter((r) => !q || [r.matnr, r.name, r.l2t, r.l3t, r.l4t].some((v) => v.toLowerCase().includes(q)))
+      .filter((r) => !q || [r.matnr, r.name, r.l2t, r.l3t, r.l4t, r.cm, r.owner, r.category].some((v) => v.toLowerCase().includes(q)))
       .map((r) => {
         const ctx: Ctx = { m: metrics(r[scenario]), p: metrics(r.prev), price: unitPrice(r[scenario]), prevPrice: unitPrice(r.prev) };
         return { r, ctx, key: col.sort(r, ctx) };
@@ -147,7 +158,7 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
   }, [list, scenario]);
 
   const onSort = (id: string) => {
-    setSort((s) => (s.id === id ? { id, desc: !s.desc } : { id, desc: !['matnr', 'name', 'l1', 'l2', 'l3', 'l4'].includes(id) }));
+    setSort((s) => (s.id === id ? { id, desc: !s.desc } : { id, desc: !TEXT_COLS.includes(id) }));
     setLimit(PAGE);
   };
   const label = (s: Scenario) => `${monthLabel(s === 'prev' ? prevYm : curYm)} ${SCENARIO_LABEL[s].split(' ')[1]}`;
@@ -174,7 +185,7 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
           ))}
         </div>
         <label className="flex items-center gap-1.5">
-          <span className="text-muted">제품계층 LV1</span>
+          <span className="text-muted">브랜드</span>
           <select
             value={l1}
             onChange={(e) => {
@@ -197,19 +208,31 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
             setQuery(e.target.value);
             setLimit(PAGE);
           }}
-          placeholder="제품코드·제품명·LV2~LV4 검색"
+          placeholder="제품코드·제품명·CM·PM 검색"
           aria-label="제품 검색"
           className="min-w-[200px] flex-1 rounded-md border border-border bg-surface px-3 py-1.5"
         />
-        <div className="segmented" role="group" aria-label="표시할 제품 지표">
+        <select
+          className="only-mobile rounded-md border border-border bg-surface px-2 py-1.5"
+          aria-label="정렬"
+          value={sort.id}
+          onChange={(e) => {
+            setSort({ id: e.target.value, desc: true });
+            setLimit(PAGE);
+          }}
+        >
+          {MOBILE_SORTS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+          {!MOBILE_SORTS.some((o) => o.id === sort.id) && <option value={sort.id}>{COLS.find((c) => c.id === sort.id)?.label}순</option>}
+        </select>
+        <div className="segmented only-pc" role="group" aria-label="표시할 제품 지표">
           <button type="button" aria-pressed={!detail} onClick={() => setDetail(false)}>핵심 지표</button>
           <button type="button" aria-pressed={detail} onClick={() => setDetail(true)}>전체 지표</button>
         </div>
         <span className="ml-auto text-xs text-muted">
-          {list.length.toLocaleString()}개 제품 · 금액 백만원, 단가 원/EA · 머리글을 누르면 정렬
+          {list.length.toLocaleString()}개 제품 · 금액 백만원, 단가 원/EA<span className="only-pc"> · 머리글을 누르면 정렬</span>
         </span>
       </div>
-      <div className="data-scroll">
+      <div className="data-scroll only-pc">
         <table className="dtable product-dtable">
           <thead>
             <tr>
@@ -268,6 +291,32 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
           </div>
         )}
       </div>
+      <ul className="m-list m-products only-mobile">
+        {list.slice(0, limit).map(({ r, ctx }) => {
+          const chg = ctx.p.sales > 0 ? growth(ctx.m.sales, ctx.p.sales) : null;
+          return (
+            <li key={r.matnr} className="m-card">
+              <div className="m-card-head">
+                <b>{r.name}</b>
+                {r.costMethod === 'rate' && <span className="m-tag">원가 대체</span>}
+              </div>
+              <p className="m-sub">{r.matnr} · {r.l1t} · CM {r.cm} · PM {r.owner}</p>
+              <dl className="m-metrics">
+                <div><dt>매출</dt><dd className="font-semibold">{mil(ctx.m.sales)}</dd>{compare && <dd className={`m-delta ${tone(chg)}`}>{pct(chg)}</dd>}</div>
+                <div><dt>GP</dt><dd>{mil(ctx.m.gp)} <small className={tone(ctx.m.gpm)}>{pct(ctx.m.gpm)}</small></dd></div>
+                <div><dt>단가(원)</dt><dd>{ctx.price == null ? '-' : won(ctx.price)}</dd>{compare && <dd className={`m-delta ${tone(priceChg(ctx))}`}>{pct(priceChg(ctx))}</dd>}</div>
+              </dl>
+            </li>
+          );
+        })}
+        {list.length > limit && (
+          <li>
+            <button type="button" className="m-more" onClick={() => setLimit((n) => n + PAGE)}>
+              {Math.min(PAGE, list.length - limit)}개 더 보기 (남은 {(list.length - limit).toLocaleString()}개)
+            </button>
+          </li>
+        )}
+      </ul>
     </div>
   );
 }

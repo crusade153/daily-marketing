@@ -1,14 +1,53 @@
+import LineOwnerEditor, { type LineSummary } from '@/components/line-owner-editor';
 import UnmappedList, { type UnmappedItem } from '@/components/unmapped-list';
-import { getDashboard, getProductMap } from '@/lib/data';
+import { getDashboard, getLineOwners, getProductMap } from '@/lib/data';
 import { eok, pct } from '@/lib/format';
 import { cmOf } from '@/lib/pnl';
+import { monthLabel } from '@/lib/period';
+import type { LineOwner, ProductMap } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
+/** 가장 많은 값과 나머지 종류 수 */
+function topOf(values: string[]): { top: string; others: number } {
+  const n = new Map<string, number>();
+  for (const v of values) if (v) n.set(v, (n.get(v) ?? 0) + 1);
+  const sorted = [...n].sort((a, b) => b[1] - a[1]);
+  return { top: sorted[0]?.[0] ?? '', others: Math.max(sorted.length - 1, 0) };
+}
+
+/** 시트 제품라인(카테고리)별 요약 + 저장된 CM·PM 이름 */
+function lineSummaries(maps: ProductMap[], owners: LineOwner[], salesByMatnr: Map<string, number>): LineSummary[] {
+  const byLine = new Map<string, ProductMap[]>();
+  for (const m of maps) if (m.category) byLine.set(m.category, [...(byLine.get(m.category) ?? []), m]);
+  const saved = new Map(owners.map((o) => [o.line, o]));
+  return [...byLine]
+    .map(([line, list]) => {
+      const mark = topOf(list.map(cmOf));
+      const owner = topOf(list.map((m) => m.owner));
+      const o = saved.get(line);
+      return {
+        line,
+        products: list.length,
+        sales: list.reduce((s, m) => s + (salesByMatnr.get(m.matnr) ?? 0), 0),
+        mark: mark.others ? `${mark.top} 외 ${mark.others}` : mark.top,
+        markKey: mark.top,
+        sheetOwner: owner.others ? `${owner.top} 외 ${owner.others}` : owner.top,
+        cm: o?.cm ?? '',
+        pm: o?.pm ?? '',
+        updatedAt: o?.updatedAt ?? '',
+        updatedBy: o?.updatedBy ?? '',
+      };
+    })
+    .sort((a, b) => b.sales - a.sales);
+}
+
 export default async function MappingPage() {
-  const [d, maps] = await Promise.all([getDashboard(), getProductMap()]);
+  const [d, maps, lineOwners] = await Promise.all([getDashboard(), getProductMap(), getLineOwners()]);
   const mapBy = new Map(maps.map((m) => [m.matnr, m]));
   const products = d.rows.filter((r) => !r.matnr.startsWith('L2:'));
+  const lines = lineSummaries(maps, lineOwners, new Map(products.map((r) => [r.matnr, r.fcst.sales])));
+  const unlined = maps.filter((m) => !m.category).length;
 
   const isMapped = (matnr: string) => {
     const m = mapBy.get(matnr);
@@ -39,11 +78,11 @@ export default async function MappingPage() {
   const owners = new Set(maps.map((m) => m.owner).filter(Boolean));
 
   return (
-    <div className="data-page">
+    <div className="mapping-page">
       <div className="page-intro">
         <h1>제품 매핑 관리</h1>
         <p>
-          제품별 CM·카테고리·담당자 연결 현황을 확인합니다. 연결 정보는 구글 시트에서 관리하며, 변경 후 최대 5분 이내에 반영됩니다.
+          제품라인별 CM·PM 담당자 이름을 이 화면에서 바로 수정하고, 제품별 CM·제품라인·담당자 연결 현황을 확인합니다. 제품별 연결은 구글 시트(product_map)에서 관리하며 변경 후 최대 5분 이내에 반영됩니다.
         </p>
         <details className="method-note"><summary>매핑 정보 관리 안내</summary><p>구글 시트의 product_map 탭에서 입력합니다. 열은 헤더 이름(MATNR · 제품명 · CM1 · CM2 · CM3 · 기타 · 카테고리 · 담당자)으로 찾으므로 순서를 바꿔도 됩니다. CM은 CM1·CM2·CM3·기타 중 제품이 속한 열 하나에만 ○를 적습니다(빈칸·X·#N/A는 미소속, 두 열 이상 표시하면 ‘(CM 중복)’). 카테고리는 HMI·만두·튀김처럼 이름을, 담당자는 이름을 적습니다. 변경 내용을 즉시 반영하려면 상단 ‘데이터 새로고침’을 선택하세요.</p></details>
       </div>
@@ -71,6 +110,7 @@ export default async function MappingPage() {
           )}
         </div>
       </section>
+      <LineOwnerEditor lines={lines} unlined={unlined} curLabel={`${monthLabel(d.curYm)} 예상`} />
       <UnmappedList items={unmapped} />
     </div>
   );

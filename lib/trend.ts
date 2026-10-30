@@ -1,5 +1,5 @@
 // 월별 추이 순수 계산. 월별 품목 손익 행 → 축별 월 시계열, 전월 대비 차이 브리지.
-import { addAmounts, axisKey, axisLabel, metrics, ZERO, type Axis } from './pnl.ts';
+import { addAmounts, axisKey, axisLabel, cmRank, metrics, ZERO, type Axis } from './pnl.ts';
 import type { Amounts, MaterialRow, MonthRow } from './types';
 
 /** actual = 마감월 CO-PA 실적, fcst = 진행 중인 달 예상 */
@@ -10,6 +10,7 @@ export interface TrendMonth {
   kind: MonthKind;
   filled: number; // 장려금·일반비를 입력한 LV1 수
   l1Total: number; // 그 달 매출이 있는 LV1 수
+  channel?: boolean; // 고객그룹3 장려금 입력이 있는 달
 }
 
 export interface MonthBlock extends TrendMonth {
@@ -74,7 +75,8 @@ export function aggregateTrend(blocks: MonthBlock[], axis: Axis): Pick<TrendData
     }
   });
   const salesSum = (g: TrendSeries) => g.months.reduce((s, a) => s + a.sales, 0);
-  return { total, groups: [...map.values()].sort((a, b) => salesSum(b) - salesSum(a)) };
+  const rank = (g: TrendSeries) => (axis === 'cm' ? cmRank(g.label) : 0);
+  return { total, groups: [...map.values()].sort((a, b) => rank(a) - rank(b) || salesSum(b) - salesSum(a)) };
 }
 
 export function sumAmounts(list: Amounts[]): Amounts {

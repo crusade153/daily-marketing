@@ -19,6 +19,10 @@ export const TABS = {
     name: 'manual_input_lv1', // 2026-10-13 입력 단위를 PRDHA2 → LV1로 바꾸며 새 탭 (예전 manual_input 탭은 비어 있음)
     header: ['YYYYMM', '제품계층LV1', '제품계층LV1명', '장려금', '일반비', '수정일시', '수정자'],
   },
+  // 제품라인(product_map 카테고리)별 CM·PM 이름. 대시보드 '제품 매핑'에서 저장, 첫 저장 때 탭 자동 생성
+  lineOwner: { name: 'line_owner', header: ['제품라인', 'CM명', 'PM명', '수정일시', '수정자'] },
+  // 장려금 고객그룹3(채널) 입력. 입력한 달은 LV1 장려금 대신 이 금액을 채널 내 제품 매출 비중으로 배부
+  channelInput: { name: 'manual_input_channel', header: ['YYYYMM', '고객그룹3', '고객그룹3명', '장려금', '수정일시', '수정자'] },
 } as const;
 
 type Tab = (typeof TABS)[keyof typeof TABS];

@@ -72,6 +72,17 @@ export interface ProductMap {
   etc: string;
   category: string;
   owner: string;
+  /** 제품라인별 CM 이름 (line_owner 탭). 있으면 CM 축에 CM1~CM3 표시 대신 이 이름을 쓴다 */
+  cmName?: string;
+}
+
+/** 제품라인(카테고리)별 CM·PM 담당자 이름 — 대시보드 '제품 매핑'에서 수정 */
+export interface LineOwner {
+  line: string;
+  cm: string;
+  pm: string;
+  updatedAt: string;
+  updatedBy: string;
 }
 
 /** 장려금·일반비 수기 입력 (제품계층 LV1, 월 전체 금액, 원) */
@@ -83,6 +94,23 @@ export interface ManualInput {
   general: number;
   updatedAt: string;
   updatedBy: string;
+}
+
+/** 장려금 고객그룹3(채널) 수기 입력 (월 전체 금액, 원). 입력한 달은 LV1 입력의 장려금 대신 쓴다 */
+export interface ChannelInput {
+  ym: string;
+  ch: string; // KVGR3
+  cht: string; // KVGR3_T
+  incentive: number;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+/** 한 달의 제품 × 고객그룹3 매출 (채널 장려금을 제품에 나누는 비중) */
+export interface ChannelSale {
+  matnr: string;
+  ch: string;
+  sales: number;
 }
 
 /** 품목 행의 분석 축 */
@@ -116,6 +144,6 @@ export interface DashboardData {
   progress: { elapsed: number; daysInMonth: number; rate: number };
   rows: MaterialRow[];
   coverage: { unitSales: number; rateSales: number; noneSales: number };
-  inputStatus: { l1Total: number; curFilled: number; prevFilled: number };
+  inputStatus: { l1Total: number; curFilled: number; prevFilled: number; curChannel: boolean; prevChannel: boolean };
   storage: 'sheets' | 'local';
 }

@@ -50,6 +50,77 @@ export async function saveManualInputs(input: unknown): Promise<SaveResult> {
   }
 }
 
+const ChannelSaveInput = z.object({
+  ym: z.string().regex(/^\d{6}$/),
+  user: z.string().trim().max(40),
+  entries: z.array(z.object({ ch: z.string().min(1).max(20), cht: z.string().max(80), incentive: Amount })).max(500),
+});
+
+/** 장려금 고객그룹3 입력 저장. (YYYYMM, 고객그룹3) 기준으로 기존 행은 덮어쓰고 없으면 추가한다. */
+export async function saveChannelInputs(input: unknown): Promise<SaveResult> {
+  const parsed = ChannelSaveInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: '입력값 형식이 올바르지 않습니다.' };
+  const { ym, user, entries } = parsed.data;
+  try {
+    const store = getStore();
+    const tab = TABS.channelInput;
+    const existing = await store.read(tab);
+    const rowByKey = new Map(existing.map((r) => [`${String(r.values[0]).trim()}|${String(r.values[1]).trim()}`, r]));
+    const at = nowKst();
+    const updates: SheetRow[] = [];
+    const appends: Cell[][] = [];
+    for (const e of entries) {
+      const values: Cell[] = [ym, e.ch, e.cht, Math.round(e.incentive), at, user || '-'];
+      const hit = rowByKey.get(`${ym}|${e.ch}`);
+      if (hit) updates.push({ rowNumber: hit.rowNumber, values });
+      else appends.push(values);
+    }
+    await store.update(tab, updates);
+    await store.append(tab, appends);
+    updateTag('manual');
+    return { ok: true, updated: updates.length, appended: appends.length };
+  } catch (e) {
+    console.error('saveChannelInputs', e);
+    return { ok: false, error: `저장 실패: ${(e as Error).message}` };
+  }
+}
+
+const LineOwnerInput = z.object({
+  user: z.string().trim().max(40),
+  entries: z
+    .array(z.object({ line: z.string().trim().min(1).max(80), cm: z.string().trim().max(40), pm: z.string().trim().max(40) }))
+    .max(500),
+});
+
+/** 제품라인별 CM·PM 이름 저장. 제품라인 기준으로 기존 행은 덮어쓰고 없으면 추가한다 (빈 이름 = 시트 기본값 사용). */
+export async function saveLineOwners(input: unknown): Promise<SaveResult> {
+  const parsed = LineOwnerInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: '입력값 형식이 올바르지 않습니다.' };
+  const { user, entries } = parsed.data;
+  try {
+    const store = getStore();
+    const tab = TABS.lineOwner;
+    const existing = await store.read(tab);
+    const rowByLine = new Map(existing.map((r) => [String(r.values[0] ?? '').trim(), r]));
+    const at = nowKst();
+    const updates: SheetRow[] = [];
+    const appends: Cell[][] = [];
+    for (const e of entries) {
+      const values: Cell[] = [e.line, e.cm, e.pm, at, user || '-'];
+      const hit = rowByLine.get(e.line);
+      if (hit) updates.push({ rowNumber: hit.rowNumber, values });
+      else appends.push(values);
+    }
+    await store.update(tab, updates);
+    await store.append(tab, appends);
+    updateTag('manual');
+    return { ok: true, updated: updates.length, appended: appends.length };
+  } catch (e) {
+    console.error('saveLineOwners', e);
+    return { ok: false, error: `저장 실패: ${(e as Error).message}` };
+  }
+}
+
 const AppendMap = z.array(z.object({ matnr: z.string().min(1).max(40), name: z.string().max(120) })).max(3000);
 
 /** 미매핑 품목을 product_map 탭에 (MATNR, 제품명)만 채워 추가한다. CM·카테고리·담당자는 시트에서 직접 입력. */

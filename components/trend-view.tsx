@@ -83,7 +83,7 @@ export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[
   const [bridgeIdx, setBridgeIdx] = useState(lastActual >= 1 ? lastActual : n - 1);
 
   const focus = groups.find((g) => g.key === focusKey) ?? null;
-  const missing = (i: number) => months[i].filled === 0;
+  const missing = (i: number) => months[i].filled === 0 && !months[i].channel;
   const ytdLabel = actualIdx.length ? `${monthLabel(months[actualIdx[0]].ym)}~${monthLabel(months[lastActual].ym)} 실적` : '';
   const ytd = (list: Amounts[]) => sumAmounts(actualIdx.map((i) => list[i]));
 
@@ -385,8 +385,8 @@ export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[
                       {monthLabel(m.ym)}
                       {m.kind === 'fcst' && <span className="ml-0.5 text-[10px]">예상</span>}
                       {needsInput(metric) && (
-                        <span className={`block text-[10px] font-normal ${m.filled ? '' : 'text-neg'}`}>
-                          {m.filled ? `입력 ${m.filled}/${m.l1Total}` : '미입력'}
+                        <span className={`block text-[10px] font-normal ${m.filled || m.channel ? '' : 'text-neg'}`}>
+                          {m.filled ? `입력 ${m.filled}/${m.l1Total}` : m.channel ? '채널 장려금' : '미입력'}
                         </span>
                       )}
                     </button>

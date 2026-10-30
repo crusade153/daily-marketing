@@ -2,12 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useState } from 'react';
 import RefreshButton from './refresh-button';
 
 const LINKS = [
   { href: '/', label: '경영 요약' },
-  { href: '/hierarchy', label: '계층별 손익' },
-  { href: '/products', label: '제품별 매출' },
+  { href: '/hierarchy', label: '손익 분석' },
   { href: '/trend', label: '월별 추이' },
   { href: '/segment', label: 'ABCD 등급관리' },
   { href: '/daily', label: '일별 매출' },
@@ -17,7 +17,16 @@ const LINKS = [
 
 export default function Nav() {
   const path = usePathname();
+  const [menu, setMenu] = useState(false);
+  // 경로가 바뀌면 모바일 메뉴를 닫는다 (렌더 중 이전 값 비교)
+  const [lastPath, setLastPath] = useState(path);
+  if (lastPath !== path) {
+    setLastPath(path);
+    setMenu(false);
+  }
   if (path === '/login') return null;
+  const isActive = (href: string) => (href === '/' ? path === '/' : path.startsWith(href));
+  const current = LINKS.find((l) => isActive(l.href));
   return (
     <header className="app-header">
       <a href="#main-content" className="skip-link">본문으로 이동</a>
@@ -26,9 +35,9 @@ export default function Nav() {
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
           <span>일일 매출·손익<span className="brand-caption">BUSINESS PERFORMANCE</span></span>
         </Link>
-        <nav className="main-nav" aria-label="주요 메뉴">
+        <nav className="main-nav only-pc" aria-label="주요 메뉴">
           {LINKS.map((l) => {
-            const active = l.href === '/' ? path === '/' : path.startsWith(l.href);
+            const active = isActive(l.href);
             return (
               <Link
                 key={l.href}
@@ -44,8 +53,28 @@ export default function Nav() {
             );
           })}
         </nav>
+        <span className="m-current">{current?.label}</span>
         <RefreshButton />
+        <button
+          type="button"
+          className="m-menu-button"
+          aria-expanded={menu}
+          aria-controls="mobile-menu"
+          aria-label="메뉴"
+          onClick={() => setMenu((v) => !v)}
+        >
+          <span aria-hidden="true">{menu ? '✕' : '☰'}</span>
+        </button>
       </div>
+      {menu && (
+        <nav id="mobile-menu" className="m-menu only-mobile" aria-label="주요 메뉴">
+          {LINKS.map((l) => (
+            <Link key={l.href} href={l.href} prefetch={false} aria-current={isActive(l.href) ? 'page' : undefined}>
+              {l.label}
+            </Link>
+          ))}
+        </nav>
+      )}
     </header>
   );
 }

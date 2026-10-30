@@ -3,14 +3,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   allocate,
+  applyLineOwners,
+  lv1InputsFor,
+  spreadChannel,
   buildMonthRows,
   buildRows,
   cmOf,
+  cmRank,
   estimateCogs,
   costRates,
   forecastFactor,
   groupBy,
   metrics,
+  ORPHAN_NAME,
   totalOf,
   unitPrice,
 } from '../lib/pnl.ts';
@@ -215,4 +220,81 @@ test('판매단가: 동일제품 단가 변동과 믹스 효과를 나눈다', (
   assert.ok(Math.abs(feb.avgChg! - (avg1 / avg0 - 1)) < 1e-12);
   assert.ok(Math.abs((1 + feb.priceChg!) * (1 + feb.mixChg!) - (1 + feb.avgChg!)) < 1e-12);
   assert.ok(Math.abs(feb.coverage! - 4100 / 5600) < 1e-12);
+});
+
+test('제품라인별 CM·PM 이름: 이름이 있으면 덮고, 비면 시트 값 유지', () => {
+  const base = { name: '', cm1: '', cm2: '○', cm3: '', etc: '', owner: '시트담당' };
+  const maps = [
+    { ...base, matnr: 'A', category: '즉석밥' },
+    { ...base, matnr: 'B', category: '라면' },
+    { ...base, matnr: 'C', category: '' },
+  ];
+  const lines = [
+    { line: '즉석밥', cm: '홍CM', pm: '김PM', updatedAt: '', updatedBy: '' },
+    { line: '라면', cm: '', pm: '', updatedAt: '', updatedBy: '' },
+  ];
+  const [a, b, c] = applyLineOwners(maps, lines);
+  assert.equal(a.cmName, '홍CM');
+  assert.equal(a.owner, '김PM');
+  assert.equal(b.cmName, undefined);
+  assert.equal(b.owner, '시트담당');
+  assert.equal(cmOf(b), 'CM2');
+  assert.equal(c.owner, '시트담당');
+  // 손익 행의 CM 축은 이름, 이름이 없으면 시트 표시
+  const fact = { matnr: 'A', name: 'a', l1: '1', l1t: '1', l2: '2', l2t: '2', l3: '3', l3t: '3', l4: '4', l4t: '4', curSales: 1, curQty: 1, prevSales: 0, prevQty: 0, prevCogs: 0, costQty: 0, costSales: 0, costCogs: 0 };
+  const rows = buildRows({ facts: [fact, { ...fact, matnr: 'B' }], maps: [a, b], curInputs: [], prevInputs: [], elapsed: 1, daysInMonth: 30 });
+  assert.deepEqual(rows.map((r) => [r.cm, r.owner]), [['홍CM', '김PM'], ['CM2', '시트담당']]);
+});
+
+test('고객그룹3 장려금: 채널 안 제품 매출 비중 배부, 매출 없는 채널은 보관 행, 그 달 LV1 장려금 제외', () => {
+  const ci = (ch: string, incentive: number, ym = '202610') => ({ ym, ch, cht: `채널${ch}`, incentive, updatedAt: '', updatedBy: '' });
+  const sales = [
+    { matnr: 'A', ch: 'E', sales: 300 },
+    { matnr: 'B', ch: 'E', sales: 100 },
+    { matnr: 'B', ch: 'C', sales: 50 },
+    { matnr: 'A', ch: 'C', sales: -10 }, // 반품은 비중에서 뺀다
+  ];
+  const sp = spreadChannel([ci('E', 1000), ci('C', 200), ci('Z', 70), ci('E', 0)], sales);
+  assert.equal(sp.byMatnr.get('A'), 750);
+  assert.equal(sp.byMatnr.get('B'), 250 + 200);
+  assert.deepEqual(sp.orphans.map((o) => o.ch), ['Z']);
+
+  const lv1 = [
+    { ym: '202610', l1: '010', l1t: 'x', incentive: 999, general: 50, updatedAt: '', updatedBy: '' },
+    { ym: '202609', l1: '010', l1t: 'x', incentive: 999, general: 50, updatedAt: '', updatedBy: '' },
+  ];
+  assert.deepEqual(lv1InputsFor(lv1, [ci('E', 1000)], '202610').map((i) => [i.incentive, i.general]), [[0, 50]]);
+  assert.deepEqual(lv1InputsFor(lv1, [ci('E', 1000)], '202609').map((i) => [i.incentive, i.general]), [[999, 50]]);
+
+  const fact = { matnr: 'A', name: 'a', l1: '010', l1t: 'x', l2: '2', l2t: '2', l3: '3', l3t: '3', l4: '4', l4t: '4', curSales: 400, curQty: 1, prevSales: 0, prevQty: 0, prevCogs: 0, costQty: 0, costSales: 0, costCogs: 0 };
+  const rows = buildRows({
+    facts: [fact, { ...fact, matnr: 'B', curSales: 200 }],
+    maps: [],
+    curInputs: lv1InputsFor(lv1, [ci('E', 1000)], '202610'),
+    prevInputs: [],
+    elapsed: 15,
+    daysInMonth: 30,
+    curChannel: sp,
+  });
+  const inc = rows.reduce((s, r) => s + r.fcst.incentive, 0);
+  assert.equal(inc, 1270); // 채널 입력 합계 그대로 (LV1 999 제외)
+  assert.equal(rows.reduce((s, r) => s + r.fcst.general, 0), 50);
+  const keep = rows.find((r) => r.matnr === 'CH:Z');
+  assert.equal(keep?.fcst.incentive, 70);
+  assert.equal(keep?.mtd.incentive, 35); // 누계 = × 진행률
+  assert.equal(keep?.name, ORPHAN_NAME);
+
+  const month = buildMonthRows({
+    ym: '202609',
+    facts: [{ matnr: 'A', name: 'a', l1: '010', l1t: 'x', l2: '2', l2t: '2', l3: '3', l3t: '3', l4: '4', l4t: '4', sales: { '202609': 10 }, qty: {}, cogs: {} }],
+    maps: [],
+    inputs: [],
+    channel: spreadChannel([ci('E', 500, '202609')], [{ matnr: 'A', ch: 'E', sales: 10 }]),
+  });
+  assert.equal(month.find((r) => r.matnr === 'A')?.amt.incentive, 500);
+});
+
+test('CM 화면 순서: CM1·CM2·CM3 → 이름 → (미매핑) → 기타', () => {
+  const labels = ['기타', '(미매핑)', 'CM3', '홍길동', 'CM1', 'CM2'];
+  assert.deepEqual([...labels].sort((a, b) => cmRank(a) - cmRank(b)), ['CM1', 'CM2', 'CM3', '홍길동', '(미매핑)', '기타']);
 });

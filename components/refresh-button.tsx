@@ -20,7 +20,7 @@ export default function RefreshButton() {
       className="rounded-md border border-border px-3 py-1.5 text-xs text-muted hover:bg-surface-2 disabled:opacity-50"
       title="BigQuery와 구글 시트를 다시 읽습니다"
     >
-      {pending ? '불러오는 중…' : '데이터 새로고침'}
+      {pending ? '불러오는 중…' : <><span className="only-pc">데이터 </span>새로고침</>}
     </button>
   );
 }

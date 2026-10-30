@@ -49,8 +49,8 @@ export default function KpiCards({
   const p = metrics(total.prev);
   const cur = monthLabel(curYm);
   const prv = monthLabel(prevYm);
-  const missing = inputStatus.curFilled === 0;
-  const prevMissing = inputStatus.prevFilled === 0;
+  const missing = inputStatus.curFilled === 0 && !inputStatus.curChannel;
+  const prevMissing = inputStatus.prevFilled === 0 && !inputStatus.prevChannel;
   return (
     <section className="kpi-grid" aria-label="주요 경영지표">
       <Card
