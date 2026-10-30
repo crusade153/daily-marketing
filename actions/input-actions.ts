@@ -60,7 +60,7 @@ export async function appendUnmappedProducts(input: unknown): Promise<SaveResult
     const store = getStore();
     const tab = TABS.productMap;
     const have = new Set((await store.read(tab)).map((r) => String(r.values[0] ?? '').trim()));
-    const rows = parsed.data.filter((p) => !have.has(p.matnr)).map((p) => [p.matnr, p.name, '', '', '', '', '']);
+    const rows = parsed.data.filter((p) => !have.has(p.matnr)).map((p) => [p.matnr, p.name, ...tab.header.slice(2).map(() => '')]);
     await store.append(tab, rows);
     updateTag('manual');
     return { ok: true, updated: 0, appended: rows.length };

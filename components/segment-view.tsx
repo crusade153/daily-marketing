@@ -42,6 +42,8 @@ export interface SegmentPeriodMeta {
   id: SegPeriod;
   label: string;
   costNote: string | null;
+  /** 등급 변동 비교 기준으로만 쓰는 기간 (분석 기간 버튼에는 없음) */
+  compareOnly?: boolean;
 }
 
 // 사분면 이름은 X = 규모, Y = 수익 기준. 다른 지표를 고르면 부제(↑·↓)로 읽는다
@@ -52,16 +54,24 @@ const Q_META: Record<Quadrant, { name: string; color: string; hx: boolean; hy: b
   D: { name: '재검토', color: 'var(--seg-d)', hx: false, hy: false },
 };
 
-const METRICS: SegMetric[] = ['sales', 'qty', 'gp', 'op', 'gpm', 'opm', 'growth'];
-const PARETO_METRICS: SegMetric[] = ['sales', 'qty', 'gp', 'op'];
+const METRICS: SegMetric[] = ['net', 'sales', 'qty', 'gp', 'op', 'gpm', 'opm', 'growth'];
+const PARETO_METRICS: SegMetric[] = ['net', 'sales', 'qty', 'gp', 'op'];
+/** 순매출·총매출 X축 기본 기준 금액, 바 상한 (그 이상은 숫자로 입력) */
+const AMOUNT_CUT = 5e7;
+const AMOUNT_BAR_MAX = 1e9;
+const AMOUNT_BAR_STEP = 1e7;
+const isSalesMetric = (m: SegMetric) => m === 'net' || m === 'sales';
+const amountCut = (c: Cut): Cut => ({ ...c, method: 'manual', manual: AMOUNT_CUT });
+/** 기준 금액 표시: 1억 이상 억, 그 아래 만원 */
+const won = (v: number) => (Math.abs(v) >= 1e8 ? `${+(v / 1e8).toFixed(2)}억원` : `${Math.round(v / 1e4).toLocaleString()}만원`);
 const BANDS: ParetoBand[] = ['core', 'support', 'tail', 'none'];
 const PAGE = 200;
 const AXIS_TICK = { fontSize: 11, fill: 'var(--viz-axis)' };
 
 const PRESETS: { label: string; x: SegMetric; xc: CutMethod; y: SegMetric; yc: CutMethod }[] = [
-  { label: '매출 × 영업이익', x: 'sales', xc: 'pareto', y: 'op', yc: 'zero' },
-  { label: '매출 × 매출이익률', x: 'sales', xc: 'pareto', y: 'gpm', yc: 'mean' },
-  { label: '매출 × 성장률', x: 'sales', xc: 'pareto', y: 'growth', yc: 'mean' },
+  { label: '순매출 × 영업이익', x: 'net', xc: 'manual', y: 'op', yc: 'zero' },
+  { label: '순매출 × 매출이익률', x: 'net', xc: 'manual', y: 'gpm', yc: 'mean' },
+  { label: '순매출 × 성장률', x: 'net', xc: 'manual', y: 'growth', yc: 'mean' },
   { label: '수량 × 매출이익', x: 'qty', xc: 'pareto', y: 'gp', yc: 'zero' },
 ];
 
@@ -94,6 +104,14 @@ function methodsFor(m: SegMetric): { id: CutMethod; label: string }[] {
       { id: 'median', label: '중앙값' },
       { id: 'zero', label: '0%' },
       { id: 'manual', label: '직접 입력' },
+    ];
+  }
+  if (isSalesMetric(m)) {
+    return [
+      { id: 'manual', label: '기준 금액' },
+      { id: 'pareto', label: '상위 누적 비중' },
+      { id: 'median', label: '중앙값' },
+      { id: 'mean', label: '평균' },
     ];
   }
   return [
@@ -223,12 +241,28 @@ function CutControl({
           <b>{Math.round(cut.pareto * 100)}%</b>
         </label>
       )}
+      {cut.method === 'manual' && isSalesMetric(metric) && (
+        <label className="seg-slider seg-amount">
+          <input
+            type="range"
+            min={0}
+            max={AMOUNT_BAR_MAX}
+            step={AMOUNT_BAR_STEP}
+            value={Math.min(Math.max(cut.manual, 0), AMOUNT_BAR_MAX)}
+            onChange={(e) => onCut({ ...cut, manual: Number(e.target.value) })}
+            aria-label={`${axis}축 기준 금액`}
+          />
+          <b>{won(cut.manual)}</b>
+        </label>
+      )}
       {cut.method === 'manual' && (
         <label className="seg-manual">
           <input
             type="number"
+            min={isSalesMetric(metric) ? 0 : undefined}
             value={toInput(metric, cut.manual)}
-            step={isRateMetric(metric) ? 0.5 : 1}
+            step={isRateMetric(metric) ? 0.5 : isSalesMetric(metric) ? 10 : 1}
+            title={isSalesMetric(metric) ? '바 상한(10억)보다 큰 금액은 여기에 백만원 단위로 입력' : undefined}
             onChange={(e) => onCut({ ...cut, manual: fromInput(metric, Number(e.target.value) || 0) })}
             aria-label={`${axis}축 기준값 (${unitOf(metric)})`}
           />
@@ -247,14 +281,15 @@ export default function SegmentView({ products, periods }: { products: SegProduc
   const [period, setPeriod] = useState<SegPeriod>('ytd');
   const [path, setPath] = useState<string[]>([]);
   const [byChild, setByChild] = useState(false);
-  const [xm, setXm] = useState<SegMetric>('sales');
+  const [xm, setXm] = useState<SegMetric>('net');
   const [ym, setYm] = useState<SegMetric>('op');
-  const [xc, setXc] = useState<Cut>({ method: 'pareto', pareto: 0.8, manual: 0 });
+  const [xc, setXc] = useState<Cut>({ method: 'manual', pareto: 0.8, manual: AMOUNT_CUT });
   const [yc, setYc] = useState<Cut>({ method: 'zero', pareto: 0.8, manual: 0 });
   const [rank, setRank] = useState(false);
-  const [pm, setPm] = useState<SegMetric>('sales');
+  const [pm, setPm] = useState<SegMetric>('net');
   const [focusQ, setFocusQ] = useState<Quadrant | null>(null);
-  const [move, setMove] = useState<string | null>(null);
+  const [cmp, setCmp] = useState<'fcst' | 'prev'>('fcst');
+  const [move, setMove] = useState<string | null>(null); // 등급 변동 칸 (null = A 이탈 전체)
   const [band, setBand] = useState<ParetoBand | ''>('');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
@@ -263,7 +298,7 @@ export default function SegmentView({ products, periods }: { products: SegProduc
   const pi = SEG_PERIODS.indexOf(period);
   const meta = periods.find((p) => p.id === period) ?? periods[0];
   const base = BASE_OF[period];
-  const baseMeta = periods.find((p) => p.id === base);
+  const periodLabel = (id: SegPeriod) => periods.find((p) => p.id === id)?.label ?? id;
   const childLevel = path.length < LEVELS.length ? LEVELS[path.length] : null;
   const unit = byChild && childLevel ? childLevel : 'product';
   const unitName = unit === 'product' ? '제품' : `LV${LEVELS.indexOf(unit) + 1}`;
@@ -293,21 +328,40 @@ export default function SegmentView({ products, periods }: { products: SegProduc
 
   const units = useMemo(() => toUnits(inScope(products, path), unit), [products, path, unit]);
   const seg = useMemo(() => segment(units, period, xm, ym, xc, yc), [units, period, xm, ym, xc, yc]);
-  const segBase = useMemo(() => (base ? segment(units, base, xm, ym, xc, yc) : null), [units, base, xm, ym, xc, yc]);
-  const moves = useMemo(() => (seg && segBase ? migration(segBase, seg) : null), [seg, segBase]);
+  // 등급 변동은 위 분석 기간과 별개로 두 달을 고른다 (기본 전월 실적 → 당월 예상)
+  const cmpFrom = BASE_OF[cmp] as SegPeriod;
+  const segFrom = useMemo(() => segment(units, cmpFrom, xm, ym, xc, yc), [units, cmpFrom, xm, ym, xc, yc]);
+  const segTo = useMemo(() => segment(units, cmp, xm, ym, xc, yc), [units, cmp, xm, ym, xc, yc]);
+  const moves = useMemo(() => (segFrom && segTo ? migration(segFrom, segTo) : null), [segFrom, segTo]);
+  const moveRows = useMemo(() => {
+    if (!moves || !segFrom || !segTo) return [];
+    const cells = move ? [move] : ['AB', 'AC', 'AD'];
+    const from = new Map(segFrom.points.map((p) => [p.unit.key, p]));
+    const to = new Map(segTo.points.map((p) => [p.unit.key, p]));
+    return cells
+      .flatMap((k) => moves.get(k) ?? [])
+      .map((key) => ({ before: from.get(key)!, after: to.get(key)! }))
+      .sort((a, b) => b.before.x - a.before.x);
+  }, [moves, segFrom, segTo, move]);
   const par = useMemo(() => pareto(units, period, pm), [units, period, pm]);
   const ptOf = useMemo(() => new Map(seg?.points.map((p) => [p.unit.key, p]) ?? []), [seg]);
 
   // ── 사분면 요약 ──
   const summary = useMemo(() => {
-    const s = Object.fromEntries(QUADRANTS.map((q) => [q, { n: 0, sales: 0, op: 0 }])) as Record<Quadrant, { n: number; sales: number; op: number }>;
+    // sales = 순매출, gross = 총매출 (영업이익률은 다른 화면처럼 총매출 대비)
+    const s = Object.fromEntries(QUADRANTS.map((q) => [q, { n: 0, sales: 0, gross: 0, op: 0 }])) as Record<
+      Quadrant,
+      { n: number; sales: number; gross: number; op: number }
+    >;
     let sales = 0;
     for (const p of seg?.points ?? []) {
       const a = p.unit.amt[pi];
+      const net = a.sales - a.incentive - a.general;
       s[p.q].n += 1;
-      s[p.q].sales += a.sales;
-      s[p.q].op += a.sales - a.cogs - a.incentive - a.general;
-      sales += a.sales;
+      s[p.q].sales += net;
+      s[p.q].gross += a.sales;
+      s[p.q].op += net - a.cogs;
+      sales += net;
     }
     return { s, sales, n: seg?.points.length ?? 0 };
   }, [seg, pi]);
@@ -360,17 +414,15 @@ export default function SegmentView({ products, periods }: { products: SegProduc
   }, [par]);
 
   // ── 리스트 ──
-  const moveKeys = useMemo(() => (move && moves ? new Set(moves.get(move) ?? []) : null), [move, moves]);
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
     return par.rows.filter(
       (r) =>
         (!focusQ || ptOf.get(r.unit.key)?.q === focusQ) &&
-        (!moveKeys || moveKeys.has(r.unit.key)) &&
         (!band || r.band === band) &&
         (!q || r.unit.label.toLowerCase().includes(q) || r.unit.code.toLowerCase().includes(q)),
     );
-  }, [par, focusQ, ptOf, moveKeys, band, query]);
+  }, [par, focusQ, ptOf, band, query]);
 
   const setLevel = (i: number, code: string) => {
     setPath(code ? [...path.slice(0, i), code] : path.slice(0, i));
@@ -379,13 +431,20 @@ export default function SegmentView({ products, periods }: { products: SegProduc
   const applyPreset = (p: (typeof PRESETS)[number]) => {
     setXm(p.x);
     setYm(p.y);
-    setXc((c) => ({ ...c, method: p.xc }));
+    setXc((c) => (p.xc === 'manual' && isSalesMetric(p.x) ? amountCut(c) : { ...c, method: p.xc }));
     setYc((c) => ({ ...c, method: p.yc }));
     if ((p.x === 'growth' || p.y === 'growth') && !base) setPeriod('fcst');
     resetFilters();
   };
   const changeMetric = (axis: 'x' | 'y', m: SegMetric) => {
-    const fix = (c: Cut): Cut => (methodsFor(m).some((x) => x.id === c.method) && c.method !== 'manual' ? c : { ...c, method: isRateMetric(m) ? 'mean' : 'pareto' });
+    const fix = (c: Cut): Cut => {
+      // 순매출↔총매출은 같은 원 단위라 기준 금액을 그대로 둔다
+      const prev = axis === 'x' ? xm : ym;
+      if (c.method === 'manual' && isSalesMetric(m) && isSalesMetric(prev)) return c;
+      if (methodsFor(m).some((x) => x.id === c.method) && c.method !== 'manual') return c;
+      if (isSalesMetric(m)) return amountCut(c);
+      return { ...c, method: isRateMetric(m) ? 'mean' : 'pareto' };
+    };
     if (axis === 'x') {
       setXm(m);
       setXc(fix);
@@ -396,7 +455,7 @@ export default function SegmentView({ products, periods }: { products: SegProduc
     resetFilters();
   };
 
-  const usesOp = [xm, ym, pm].some((m) => m === 'op' || m === 'opm');
+  const usesOp = [xm, ym, pm].some((m) => m === 'op' || m === 'opm' || m === 'net');
   const xLabel = SEG_METRIC_LABEL[xm];
   const yLabel = SEG_METRIC_LABEL[ym];
   const scopeLabel = path.length ? path.map((code, i) => levelOptions[i].find(([k]) => k === code)?.[1].label ?? code).join(' › ') : '전체';
@@ -409,7 +468,7 @@ export default function SegmentView({ products, periods }: { products: SegProduc
       <div className="card seg-controls">
         <div className="seg-row">
           <div className="segmented" role="group" aria-label="분석 기간">
-            {periods.map((p) => (
+            {periods.filter((p) => !p.compareOnly).map((p) => (
               <button
                 key={p.id}
                 type="button"
@@ -471,7 +530,7 @@ export default function SegmentView({ products, periods }: { products: SegProduc
         </div>
         {(usesOp && meta.costNote) || (seg && seg.excluded > 0) ? (
           <p className="seg-note">
-            {usesOp && meta.costNote && <span>{meta.costNote} — 미입력 계층은 영업이익이 매출이익과 같습니다.</span>}
+            {usesOp && meta.costNote && <span>{meta.costNote} — 미입력 계층은 순매출이 총매출과, 영업이익이 매출이익과 같습니다.</span>}
             {seg && seg.excluded > 0 && <span>{xLabel}·{yLabel} 값이 없는 {unitName} {seg.excluded}개 제외 (매출 0인 이익률, 비교 기간 매출 0인 성장률 등)</span>}
           </p>
         ) : null}
@@ -613,7 +672,6 @@ export default function SegmentView({ products, periods }: { products: SegProduc
                   aria-pressed={focusQ === q}
                   onClick={() => {
                     setFocusQ((f) => (f === q ? null : q));
-                    setMove(null);
                     setLimit(PAGE);
                   }}
                 >
@@ -631,14 +689,14 @@ export default function SegmentView({ products, periods }: { products: SegProduc
                     <small>개 ({summary.n ? pct(s.n / summary.n, 0) : '-'})</small>
                   </span>
                   <span className="seg-quad-kv">
-                    <span>매출</span>
+                    <span>순매출</span>
                     <b className="num">{eok(s.sales)}</b>
                     <span className="num text-muted">{summary.sales ? pct(s.sales / summary.sales, 0) : '-'}</span>
                   </span>
                   <span className="seg-quad-kv">
                     <span>영업이익</span>
                     <b className={`num ${s.op < 0 ? 'text-neg' : ''}`}>{minus(eok(s.op))}</b>
-                    <span className="num text-muted">{s.sales ? minus(pct(s.op / s.sales)) : '-'}</span>
+                    <span className="num text-muted">{s.gross ? minus(pct(s.op / s.gross)) : '-'}</span>
                   </span>
                 </button>
               );
@@ -649,10 +707,17 @@ export default function SegmentView({ products, periods }: { products: SegProduc
             <div className="panel-heading">
               <div>
                 <h2 id="seg-move-title">등급 변동</h2>
-                <p>{baseMeta ? `${baseMeta.label} → ${meta.label} · 같은 기준으로 다시 등급 분류` : '월 단위 기간(당월 예상·전월 실적)에서 전월과 비교합니다.'}</p>
+                <p>같은 기준으로 두 달을 다시 등급 분류 · 칸을 누르면 아래 상세</p>
               </div>
             </div>
-            {moves && segBase ? (
+            <div className="segmented seg-move-pick" role="group" aria-label="등급 변동 비교 기간">
+              {(['fcst', 'prev'] as const).map((id) => (
+                <button key={id} type="button" aria-pressed={cmp === id} onClick={() => { setCmp(id); setMove(null); }}>
+                  {periodLabel(BASE_OF[id] as SegPeriod)} → {periodLabel(id)}
+                </button>
+              ))}
+            </div>
+            {moves ? (
               <>
                 <table className="seg-move-table">
                   <thead>
@@ -677,11 +742,7 @@ export default function SegmentView({ products, periods }: { products: SegProduc
                                 disabled={!n}
                                 aria-pressed={move === k}
                                 title={`${from} → ${to}: ${n}개`}
-                                onClick={() => {
-                                  setMove((m) => (m === k ? null : k));
-                                  setFocusQ(null);
-                                  setLimit(PAGE);
-                                }}
+                                onClick={() => setMove((m) => (m === k ? null : k))}
                               >
                                 {n || '·'}
                               </button>
@@ -700,14 +761,72 @@ export default function SegmentView({ products, periods }: { products: SegProduc
                       if (k[0] === k[1]) stay += v.length;
                       else moved += v.length;
                     }
-                    return `유지 ${stay}개 · 이동 ${moved}개 · 칸을 누르면 리스트 필터`;
+                    return `유지 ${stay}개 · 이동 ${moved}개`;
                   })()}
                 </p>
               </>
-            ) : null}
+            ) : (
+              <p className="seg-empty">선택한 조건에 비교할 실적이 없습니다.</p>
+            )}
           </section>
         </aside>
       </div>
+
+      {/* ── 등급 변동 상세 ── */}
+      <section className="card seg-list" aria-labelledby="seg-moves-title">
+        <div className="seg-list-head">
+          <h2 id="seg-moves-title">등급 변동 상세</h2>
+          <span className="text-muted">
+            {periodLabel(cmpFrom)} → {periodLabel(cmp)} · {move ? `${move[0]} → ${move[1]}` : 'A에서 B·C·D로 내려간'} {unitName} {moveRows.length.toLocaleString()}개
+          </span>
+          {move && (
+            <button type="button" className="seg-link" onClick={() => setMove(null)}>
+              A 이탈 전체 보기
+            </button>
+          )}
+        </div>
+        <div className="seg-list-scroll seg-moves-scroll">
+          <table className="dtable seg-dtable">
+            <thead>
+              <tr>
+                <th className="text-left">{unitName}</th>
+                <th>등급 변화</th>
+                <th className="num">{xLabel} {periodLabel(cmpFrom)}</th>
+                <th className="num">{xLabel} {periodLabel(cmp)}</th>
+                <th className="num">{yLabel} {periodLabel(cmpFrom)}</th>
+                <th className="num">{yLabel} {periodLabel(cmp)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {moveRows.map(({ before, after }) => (
+                <tr
+                  key={after.unit.key}
+                  className={selected === after.unit.key ? 'is-selected' : ''}
+                  onClick={() => setSelected((s) => (s === after.unit.key ? null : after.unit.key))}
+                >
+                  <td className="seg-name" title={`${after.unit.code} ${after.unit.label}`}>
+                    <span>{after.unit.label}</span>
+                    <small>{after.unit.code}{after.unit.count > 1 ? ` · 제품 ${after.unit.count}개` : ''}</small>
+                  </td>
+                  <td>
+                    <span className="seg-badge"><i style={{ background: Q_META[before.q].color }} />{before.q}</span>
+                    {' → '}
+                    <span className="seg-badge"><i style={{ background: Q_META[after.q].color }} />{after.q} {Q_META[after.q].name}</span>
+                  </td>
+                  <td className="num">{fmtVal(xm, before.x)}</td>
+                  <td className="num font-semibold">{fmtVal(xm, after.x)}</td>
+                  <td className={`num ${before.y < 0 ? 'text-neg' : ''}`}>{fmtVal(ym, before.y)}</td>
+                  <td className={`num font-semibold ${after.y < 0 ? 'text-neg' : ''}`}>{fmtVal(ym, after.y)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!moveRows.length && <p className="seg-empty">해당하는 {unitName}이 없습니다.</p>}
+        </div>
+        <p className="seg-list-foot">
+          금액 백만원 · 기준선은 각 달 안에서 다시 계산(기준 금액·0 기준은 그대로) · {periodLabel(cmpFrom)} 기준 {xLabel} 큰 순
+        </p>
+      </section>
 
       {/* ── 파레토 ── */}
       <div className="seg-pareto">
@@ -781,11 +900,10 @@ export default function SegmentView({ products, periods }: { products: SegProduc
             <span className="text-muted">
               {SEG_METRIC_LABEL[pm]} 큰 순 · {list.length.toLocaleString()}개
               {focusQ && ` · ${focusQ} ${Q_META[focusQ].name}`}
-              {move && ` · ${move[0]}→${move[1]} 이동`}
               {band && ` · ${BAND_LABEL[band]}`}
             </span>
-            {(focusQ || move || band) && (
-              <button type="button" className="seg-link" onClick={() => { setFocusQ(null); setMove(null); setBand(''); }}>
+            {(focusQ || band) && (
+              <button type="button" className="seg-link" onClick={() => { setFocusQ(null); setBand(''); }}>
                 필터 해제
               </button>
             )}

@@ -19,15 +19,17 @@ export interface SegProduct extends Hierarchy {
   a: [number, number, number, number][];
 }
 
-export type SegMetric = 'sales' | 'qty' | 'gp' | 'op' | 'gpm' | 'opm' | 'growth';
+/** net = 순매출 = 총매출 − 판관비(입력한 장려금·일반비). 미입력이면 총매출과 같다 */
+export type SegMetric = 'net' | 'sales' | 'qty' | 'gp' | 'op' | 'gpm' | 'opm' | 'growth';
 export const SEG_METRIC_LABEL: Record<SegMetric, string> = {
-  sales: '매출',
+  net: '순매출',
+  sales: '총매출',
   qty: '판매수량',
   gp: '매출이익',
   op: '영업이익',
   gpm: '매출이익률',
   opm: '영업이익률',
-  growth: '매출 성장률',
+  growth: '총매출 성장률',
 };
 export const isRateMetric = (m: SegMetric) => m === 'gpm' || m === 'opm' || m === 'growth';
 
@@ -97,6 +99,7 @@ export function toUnits(products: SegProduct[], unit: Level | 'product'): SegUni
 export function unitValue(u: SegUnit, period: SegPeriod, metric: SegMetric): number | null {
   const i = SEG_PERIODS.indexOf(period);
   const m = metrics(u.amt[i]);
+  if (metric === 'net') return m.sales - m.incentive - m.general;
   if (metric !== 'growth') return m[metric];
   const base = BASE_OF[period];
   if (!base) return null;

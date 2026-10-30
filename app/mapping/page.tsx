@@ -45,7 +45,7 @@ export default async function MappingPage() {
         <p>
           제품별 CM·카테고리·담당자 연결 현황을 확인합니다. 연결 정보는 구글 시트에서 관리하며, 변경 후 최대 5분 이내에 반영됩니다.
         </p>
-        <details className="method-note"><summary>매핑 정보 관리 안내</summary><p>구글 시트의 product_map 탭에서 입력합니다. 열 순서: 제품코드(MATNR) | 제품명 | CM1 | CM2 | CM3 | 카테고리 | 담당자. CM은 제품이 속한 열 하나에만 O를 적습니다(빈칸·X는 미소속, 두 열 이상 표시하면 ‘(CM 중복)’). 카테고리는 HMI·만두·튀김처럼 이름을, 담당자는 이름을 적습니다. 변경 내용을 즉시 반영하려면 상단 ‘데이터 새로고침’을 선택하세요.</p></details>
+        <details className="method-note"><summary>매핑 정보 관리 안내</summary><p>구글 시트의 product_map 탭에서 입력합니다. 열은 헤더 이름(MATNR · 제품명 · CM1 · CM2 · CM3 · 기타 · 카테고리 · 담당자)으로 찾으므로 순서를 바꿔도 됩니다. CM은 CM1·CM2·CM3·기타 중 제품이 속한 열 하나에만 ○를 적습니다(빈칸·X·#N/A는 미소속, 두 열 이상 표시하면 ‘(CM 중복)’). 카테고리는 HMI·만두·튀김처럼 이름을, 담당자는 이름을 적습니다. 변경 내용을 즉시 반영하려면 상단 ‘데이터 새로고침’을 선택하세요.</p></details>
       </div>
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="card px-4 py-3">

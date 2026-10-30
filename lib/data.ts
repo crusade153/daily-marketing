@@ -204,21 +204,32 @@ const toNum = (v: Cell | undefined) => {
   const n = Number(String(v ?? '').replaceAll(',', '').trim());
   return Number.isFinite(n) ? n : 0;
 };
-const toStr = (v: Cell | undefined) => (v == null ? '' : String(v).trim());
+/** 수식 오류(#N/A 등)는 빈칸으로 본다 */
+const toStr = (v: Cell | undefined) => {
+  const s = v == null ? '' : String(v).trim();
+  return /^#(N\/A|REF!|VALUE!|DIV\/0!|NAME\?|NULL!|NUM!|ERROR!)/.test(s) ? '' : s;
+};
 
 async function readProductMap(): Promise<ProductMap[]> {
   const rows = await getStore().read(TABS.productMap);
+  // 헤더 행(첫 칸 MATNR)이 데이터 위쪽에 있으면 그 이름으로 열을 찾는다. 없으면 TABS 순서
+  const head = rows.slice(0, 5).find((r) => toStr(r.values[0]) === 'MATNR');
+  const names: string[] = head ? head.values.map(toStr) : [...TABS.productMap.header];
+  // 헤더에 없는 열은 -1 → 빈칸
+  const [cMat, cName, c1, c2, c3, cEtc, cCat, cOwner] = ['MATNR', '제품명', 'CM1', 'CM2', 'CM3', '기타', '카테고리', '담당자'].map((n) => names.indexOf(n));
   return rows
+    .filter((r) => r !== head)
     .map(({ values: v }) => ({
-      matnr: toStr(v[0]),
-      name: toStr(v[1]),
-      cm1: toStr(v[2]),
-      cm2: toStr(v[3]),
-      cm3: toStr(v[4]),
-      category: toStr(v[5]),
-      owner: toStr(v[6]),
+      matnr: toStr(v[cMat]),
+      name: toStr(v[cName]),
+      cm1: toStr(v[c1]),
+      cm2: toStr(v[c2]),
+      cm3: toStr(v[c3]),
+      etc: toStr(v[cEtc]),
+      category: toStr(v[cCat]),
+      owner: toStr(v[cOwner]),
     }))
-    .filter((m) => m.matnr);
+    .filter((m) => m.matnr && m.matnr !== 'MATNR');
 }
 
 async function readManualInputs(): Promise<ManualInput[]> {
@@ -237,7 +248,7 @@ async function readManualInputs(): Promise<ManualInput[]> {
 }
 
 // 시트를 직접 고친 경우를 위해 5분 주기로도 갱신. 앱에서 저장하면 updateTag('manual')로 즉시 갱신.
-export const getProductMap = unstable_cache(readProductMap, ['product-map-v1'], { revalidate: 300, tags: ['manual'] });
+export const getProductMap = unstable_cache(readProductMap, ['product-map-v2'], { revalidate: 300, tags: ['manual'] });
 export const getManualInputs = unstable_cache(readManualInputs, ['manual-input-lv1-v1'], {
   revalidate: 300,
   tags: ['manual'],
@@ -372,7 +383,7 @@ export async function getPriceTrend(today?: string): Promise<PriceTrend> {
 
 export interface SegmentData {
   products: SegProduct[];
-  periods: { id: SegPeriod; label: string; costNote: string | null }[];
+  periods: { id: SegPeriod; label: string; costNote: string | null; compareOnly?: boolean }[];
   dataDate: string | null;
 }
 
@@ -425,6 +436,7 @@ export async function getSegment(today?: string): Promise<SegmentData> {
       },
       { id: 'fcst', label: `${monthLabel(d.curYm)} 예상`, costNote: note(cur) },
       { id: 'prev', label: `${monthLabel(d.prevYm)} 실적`, costNote: note(prevBlock) },
+      ...(prev2 ? [{ id: 'prev2' as const, label: `${monthLabel(prev2.ym)} 실적`, costNote: note(prev2), compareOnly: true }] : []),
     ],
     dataDate: d.dataDate,
   };

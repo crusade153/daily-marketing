@@ -120,13 +120,20 @@ export const ORPHAN_NAME = '(매출 없음 · 입력 비용)';
 /** 소속이 아님을 뜻하는 표시. 빈칸도 미소속 */
 const NOT_MARKED = new Set(['X', 'x', '×', 'N', 'n', '0', '-']);
 
-/** 시트 CM1~CM3 열 중 표시가 된 열 이름. 없으면 미매핑, 둘 이상이면 중복 */
+const CM_COLS = [
+  ['cm1', 'CM1'],
+  ['cm2', 'CM2'],
+  ['cm3', 'CM3'],
+  ['etc', '기타'],
+] as const;
+
+/** 시트 CM1~CM3·기타 열 중 표시가 된 열 이름. 없으면 미매핑, 둘 이상이면 중복 */
 export function cmOf(m: ProductMap | undefined): string {
   if (!m) return UNMAPPED;
-  const marked = (['cm1', 'cm2', 'cm3'] as const).filter((k) => m[k] && !NOT_MARKED.has(m[k]));
+  const marked = CM_COLS.filter(([k]) => m[k] && !NOT_MARKED.has(m[k]));
   if (marked.length === 0) return UNMAPPED;
   if (marked.length > 1) return CM_DUPLICATE;
-  return marked[0].toUpperCase();
+  return marked[0][1];
 }
 
 function dimsOf(f: Hierarchy & { matnr: string; name: string }, m: ProductMap | undefined): RowDims {

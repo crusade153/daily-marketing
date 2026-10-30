@@ -85,12 +85,13 @@ test('매출원가: 3개월 단위원가 × 당월 수량, 이력 없으면 계�
 });
 
 test('CM: 표시한 열 이름, X·빈칸은 미소속, 둘 이상이면 중복', () => {
-  const m = (cm1: string, cm2: string, cm3: string) => ({ matnr: 'a', name: 'n', cm1, cm2, cm3, category: '', owner: '' });
-  assert.equal(cmOf(m('O', '', '')), 'CM1');
+  const m = (cm1: string, cm2: string, cm3: string, etc = '') => ({ matnr: 'a', name: 'n', cm1, cm2, cm3, etc, category: '', owner: '' });
+  assert.equal(cmOf(m('○', '', '')), 'CM1');
   assert.equal(cmOf(m('X', 'x', 'v')), 'CM3');
+  assert.equal(cmOf(m('', '', '', '○')), '기타');
   assert.equal(cmOf(m('', '', '')), '(미매핑)');
   assert.equal(cmOf(undefined), '(미매핑)');
-  assert.equal(cmOf(m('O', 'O', '')), '(CM 중복)');
+  assert.equal(cmOf(m('○', '', '', '○')), '(CM 중복)');
 });
 
 test('배분: 양(+)의 매출 비중, 가중치 없으면 null', () => {
@@ -106,7 +107,7 @@ test('buildRows: LV1 입력을 LV1 안 제품 매출 비중으로 배부, 예상
   ];
   const rows = buildRows({
     facts,
-    maps: [{ matnr: 'a', name: 'n', cm1: '', cm2: 'O', cm3: '', category: '', owner: '홍길동' }],
+    maps: [{ matnr: 'a', name: 'n', cm1: '', cm2: '○', cm3: '', etc: '', category: '', owner: '홍길동' }],
     curInputs: [input('202610', 'A', 40, 20), input('202610', 'ZZ', 7, 3)],
     prevInputs: [input('202609', 'A', 50, 10)],
     elapsed: 10,

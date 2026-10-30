@@ -13,7 +13,8 @@ export interface SheetRow {
 }
 
 export const TABS = {
-  productMap: { name: 'product_map', header: ['MATNR', '제품명', 'CM1', 'CM2', 'CM3', '카테고리', '담당자'] },
+  // 실제 시트는 1행에 안내 문구, 2행에 헤더가 있다. 읽을 때는 헤더 이름으로 열을 찾는다 (data.ts readProductMap)
+  productMap: { name: 'product_map', header: ['MATNR', '제품명', 'CM1', 'CM2', 'CM3', '카테고리', '담당자', '기타'] },
   manualInput: {
     name: 'manual_input_lv1', // 2026-10-13 입력 단위를 PRDHA2 → LV1로 바꾸며 새 탭 (예전 manual_input 탭은 비어 있음)
     header: ['YYYYMM', '제품계층LV1', '제품계층LV1명', '장려금', '일반비', '수정일시', '수정자'],
@@ -29,7 +30,7 @@ interface Store {
   append(tab: Tab, rows: Cell[][]): Promise<void>;
 }
 
-const colLetter = (n: number) => String.fromCharCode(64 + n); // 헤더가 7열 이하라 A~Z면 충분
+const colLetter = (n: number) => String.fromCharCode(64 + n); // 헤더가 8열 이하라 A~Z면 충분
 
 function sheetsStore(spreadsheetId: string): Store {
   const email = process.env.SHEETS_CLIENT_EMAIL ?? process.env.GOOGLE_CLIENT_EMAIL;

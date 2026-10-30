@@ -73,6 +73,14 @@ test('파레토 등급: 경계를 넘기는 항목까지 핵심, 0 이하는 손
   assert.equal(rows[1].cum, 1);
 });
 
+test('순매출 = 총매출 − 장려금·일반비, 기준 금액 이상이 ↑', () => {
+  const units = toUnits(products, 'product');
+  assert.equal(unitValue(units[0], 'fcst', 'net'), 550); // 600 − 50
+  assert.equal(unitValue(units[1], 'fcst', 'net'), 250); // 판관비 미입력이면 총매출과 같다
+  const seg = segment(units, 'fcst', 'net', 'op', cut('manual', { manual: 250 }), cut('zero'))!;
+  assert.deepEqual(Object.fromEntries(seg.points.map((p) => [p.unit.key, p.q])), { m1: 'A', m2: 'C', m3: 'B', m4: 'D' });
+});
+
 test('기간 간 세그먼트 이동', () => {
   const units = toUnits(products, 'product');
   const before = segment(units, 'prev', 'sales', 'op', cut('manual', { manual: 200 }), cut('zero'))!;
