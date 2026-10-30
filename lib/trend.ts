@@ -1,5 +1,5 @@
 // 월별 추이 순수 계산. 월별 품목 손익 행 → 축별 월 시계열, 전월 대비 차이 브리지.
-import { addAmounts, axisKey, axisLabel, cmRank, metrics, ZERO, type Axis } from './pnl.ts';
+import { addAmounts, axisKey, axisLabel, cmGroupRank, metrics, ZERO, type Axis } from './pnl.ts';
 import type { Amounts, MaterialRow, MonthRow } from './types';
 
 /** actual = 마감월 CO-PA 실적, fcst = 진행 중인 달 예상 */
@@ -8,9 +8,8 @@ export type MonthKind = 'actual' | 'fcst';
 export interface TrendMonth {
   ym: string;
   kind: MonthKind;
-  filled: number; // 장려금·일반비를 입력한 LV1 수
-  l1Total: number; // 그 달 매출이 있는 LV1 수
-  channel?: boolean; // 고객그룹3 장려금 입력이 있는 달
+  filled: number; // 장려금·일반비를 입력한 채널(고객그룹3) 수
+  chTotal: number; // 그 달 매출이 있는 채널 수
 }
 
 export interface MonthBlock extends TrendMonth {
@@ -20,6 +19,7 @@ export interface MonthBlock extends TrendMonth {
 export interface TrendSeries {
   key: string; // 묶는 기준 (제품계층은 코드)
   label: string; // 화면 표시 이름
+  marks?: string[]; // CM 축 순서용 시트 CM 표시 (행마다)
   months: Amounts[]; // TrendData.months와 같은 순서
 }
 
@@ -35,11 +35,11 @@ export type TrendMetric = 'sales' | 'gp' | 'gpm' | 'op' | 'opm';
 export type AmountMetric = 'sales' | 'gp' | 'op';
 
 export const METRIC_LABEL: Record<TrendMetric, string> = {
-  sales: '매출',
-  gp: '매출이익',
-  gpm: '매출이익률',
+  sales: '총매출',
+  gp: '매출총이익',
+  gpm: 'GP율',
   op: '영업이익',
-  opm: '영업이익률',
+  opm: 'OP율',
 };
 
 export const isRate = (m: TrendMetric) => m === 'gpm' || m === 'opm';
@@ -67,16 +67,20 @@ export function aggregateTrend(blocks: MonthBlock[], axis: Axis): Pick<TrendData
       const key = axisKey(r, axis);
       let g = map.get(key);
       if (!g) {
-        g = { key, label: axisLabel(r, axis), months: Array.from({ length: n }, () => ({ ...ZERO })) };
+        g = { key, label: axisLabel(r, axis), marks: [], months: Array.from({ length: n }, () => ({ ...ZERO })) };
         map.set(key, g);
       }
+      g.marks?.push(r.cmMark);
       g.months[i] = addAmounts(g.months[i], r.amt);
       total[i] = addAmounts(total[i], r.amt);
     }
   });
   const salesSum = (g: TrendSeries) => g.months.reduce((s, a) => s + a.sales, 0);
-  const rank = (g: TrendSeries) => (axis === 'cm' ? cmRank(g.label) : 0);
-  return { total, groups: [...map.values()].sort((a, b) => rank(a) - rank(b) || salesSum(b) - salesSum(a)) };
+  const rank = (g: TrendSeries) => (axis === 'cm' ? cmGroupRank(g.label, g.marks ?? []) : 0);
+  // marks는 정렬에만 쓰고 화면으로 보내지 않는다
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const groups = [...map.values()].sort((a, b) => rank(a) - rank(b) || salesSum(b) - salesSum(a)).map(({ marks, ...g }) => g);
+  return { total, groups };
 }
 
 export function sumAmounts(list: Amounts[]): Amounts {

@@ -2,15 +2,15 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { saveChannelInputs, saveManualInputs } from '@/actions/input-actions';
+import { saveChannelInputs } from '@/actions/input-actions';
 import { mil, pct } from '@/lib/format';
 import { monthLabel } from '@/lib/period';
 
-/** 입력 행 = 제품계층 LV1 또는 고객그룹3 */
+/** 입력 행 = 고객그룹3(채널) */
 export interface InputItem {
-  key: string; // LV1 코드 또는 KVGR3
+  key: string; // KVGR3
   label: string;
-  sales: Record<string, number>; // 월별 참고 매출 (LV1: 마감월 실적·당월 예상, 고객그룹3: 실적·당월 누계)
+  sales: Record<string, number>; // 월별 참고 매출 (마감월 실적, 당월 누계)
 }
 
 /** 저장된 입력값 (월 × 행) */
@@ -23,9 +23,6 @@ export interface SavedInput {
   updatedBy: string;
 }
 
-/** lv1 = 장려금·일반비 (제품계층 LV1), channel = 장려금 (고객그룹3) */
-export type InputKind = 'lv1' | 'channel';
-
 export interface InputMonth {
   ym: string;
   kind: 'actual' | 'fcst';
@@ -33,7 +30,7 @@ export interface InputMonth {
 
 type Field = 'incentive' | 'general';
 const FIELD_LABEL: Record<Field, string> = { incentive: '장려금', general: '일반비' };
-const FIELDS_OF: Record<InputKind, Field[]> = { lv1: ['incentive', 'general'], channel: ['incentive'] };
+const FIELDS: Field[] = ['incentive', 'general'];
 const UNITS = [
   { v: 1, label: '원' },
   { v: 1e3, label: '천원' },
@@ -63,23 +60,17 @@ function writeLocal(k: string, v: string) {
 }
 
 export default function InputGrid({
-  kind,
   items,
   inputs,
   months,
   curYm,
-  channelYms = [],
 }: {
-  kind: InputKind;
   items: InputItem[];
   inputs: SavedInput[];
   months: InputMonth[];
   curYm: string;
-  /** LV1 화면: 고객그룹3 장려금이 입력돼 LV1 장려금이 손익에 쓰이지 않는 달 */
-  channelYms?: string[];
 }) {
-  const FIELDS = FIELDS_OF[kind];
-  const rowName = kind === 'lv1' ? '제품계층 LV1' : '고객그룹3';
+  const rowName = '고객그룹3';
   const router = useRouter();
   const [ym, setYm] = useState(curYm);
   const [unit, setUnit] = useState(1);
@@ -137,7 +128,7 @@ export default function InputGrid({
       }
     }
     return { dirty, invalid };
-  }, [items, buf, valueOf, baseValue, FIELDS]);
+  }, [items, buf, valueOf, baseValue]);
 
   // 저장 안 한 변경이 있으면 페이지 이탈 경고
   useEffect(() => {
@@ -151,30 +142,23 @@ export default function InputGrid({
     if (!dirty.size || invalid || pending) return;
     const changed = items.filter((it) => dirty.has(it.key));
     start(async () => {
-      const res =
-        kind === 'lv1'
-          ? await saveManualInputs({
-              ym,
-              user,
-              entries: changed.map((it) => ({
-                l1: it.key,
-                l1t: it.label,
-                incentive: valueOf(it.key, 'incentive') ?? 0,
-                general: valueOf(it.key, 'general') ?? 0,
-              })),
-            })
-          : await saveChannelInputs({
-              ym,
-              user,
-              entries: changed.map((it) => ({ ch: it.key, cht: it.label, incentive: valueOf(it.key, 'incentive') ?? 0 })),
-            });
+      const res = await saveChannelInputs({
+        ym,
+        user,
+        entries: changed.map((it) => ({
+          ch: it.key,
+          cht: it.label,
+          incentive: valueOf(it.key, 'incentive') ?? 0,
+          general: valueOf(it.key, 'general') ?? 0,
+        })),
+      });
       if (res.ok) {
         setMsg({ ok: true, text: `저장했습니다. 수정 ${res.updated}건 · 신규 ${res.appended}건` });
         setBuf({});
         router.refresh();
       } else setMsg({ ok: false, text: res.error });
     });
-  }, [dirty, invalid, pending, items, valueOf, ym, user, router, kind]);
+  }, [dirty, invalid, pending, items, valueOf, ym, user, router]);
 
   const saveRef = useRef(save);
   useEffect(() => {
@@ -331,16 +315,8 @@ export default function InputGrid({
         {isFcst
           ? '진행 중인 달은 월 전체 예상 금액을 입력합니다. 누계 손익에는 진행률만큼 반영됩니다.'
           : '마감된 달은 확정된 실적 금액을 입력합니다.'}{' '}
-        {kind === 'lv1'
-          ? '장려금·일반비 두 열은 엑셀에서 복사해 첫 칸에 붙여넣을 수 있습니다.'
-          : '입력한 금액은 그 달 그 고객그룹3의 제품별 매출 비중으로 제품에 배부되고, 이 달의 LV1 장려금 대신 쓰입니다. 엑셀 한 열을 첫 칸에 붙여넣을 수 있습니다.'}
+        입력한 금액은 그 달 그 고객그룹3의 제품별 총매출 비중으로 제품에 배부됩니다. 장려금·일반비 두 열은 엑셀에서 복사해 첫 칸에 붙여넣을 수 있습니다.
       </p>
-      {kind === 'lv1' && channelYms.includes(ym) && (
-        <p className="notice-bar">
-          <span className="notice-label">확인</span>
-          <span>{monthLabel(ym)}은 고객그룹3 장려금이 입력돼 있어 아래 <b>LV1 장려금은 손익에 반영되지 않습니다</b>. 일반비는 그대로 반영됩니다.</span>
-        </p>
-      )}
 
       <div className="card data-scroll">
         <table className="dtable" ref={tableRef}>
@@ -348,7 +324,7 @@ export default function InputGrid({
             <tr>
               <th className="text-left">{rowName}</th>
               <th className="text-left">코드</th>
-              <th className="num">{isFcst ? (kind === 'lv1' ? '예상 매출' : '누계 매출') : '실적 매출'} (백만원)</th>
+              <th className="num">{isFcst ? '누계 매출' : '실적 매출'} (백만원)</th>
               {FIELDS.map((f) => (
                 <Fragment key={f}>
                   <th className="num">{FIELD_LABEL[f]} ({unitLabel})</th>

@@ -3,19 +3,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cutValue, inScope, migration, paretoCut, pareto, quadrantOf, segment, toUnits, unitValue, type Cut, type SegProduct } from '../lib/segment.ts';
 
-// a[i] = [매출, 수량, 원가, 장려금+일반비], 기간 순서 ytd · fcst · prev · prev2
-const P = (matnr: string, l1: string, l2: string, fcst: [number, number, number, number], prev: [number, number, number, number] = [0, 0, 0, 0]): SegProduct => ({
+// a[i] = [매출, 수량, 원가, 장려금, 일반비], 기간 순서 ytd · fcst · prev · prev2. 범위 단계는 CM › PM
+type Q = [number, number, number, number];
+const five = ([s, q, c, inc]: Q): [number, number, number, number, number] => [s, q, c, inc, 0];
+const P = (matnr: string, cm: string, owner: string, fcst: Q, prev: Q = [0, 0, 0, 0]): SegProduct => ({
   matnr,
   name: matnr,
-  l1,
-  l1t: l1,
-  l2,
-  l2t: l2,
-  l3: `${l2}0`,
-  l3t: `${l2}0`,
-  l4: `${l2}00`,
-  l4t: `${l2}00`,
-  a: [fcst, fcst, prev, [0, 0, 0, 0]],
+  cm,
+  cmMark: cm,
+  owner,
+  category: owner,
+  l1t: cm,
+  a: [five(fcst), five(fcst), five(prev), [0, 0, 0, 0, 0]],
 });
 
 const products = [
@@ -57,10 +56,10 @@ test('계층 범위를 좁히면 기준선이 그 안에서 다시 계산된다'
 });
 
 test('하위 계층 묶음과 비율 지표의 가중평균 기준선', () => {
-  const units = toUnits(products, 'l1');
+  const units = toUnits(products, 'cm');
   assert.deepEqual(units.map((u) => [u.key, u.count, u.amt[1].sales]), [['A', 2, 850], ['B', 3, 150]]);
-  // 전체 매출이익률 = (1000 − 810) / 1000
-  assert.ok(Math.abs(cutValue(units, 'fcst', 'gpm', cut('mean'))! - 0.19) < 1e-9);
+  // 전체 GP율 = (순매출 950 − 원가 810) / 순매출 950 (순매출 = 총매출 1000 − 장려금 50)
+  assert.ok(Math.abs(cutValue(units, 'fcst', 'gpm', cut('mean'))! - 140 / 950) < 1e-9);
   // 성장률: 비교 기간(prev) 매출이 0이면 값 없음
   assert.equal(unitValue(toUnits(products, 'product')[2], 'fcst', 'growth'), null);
   assert.ok(Math.abs(unitValue(units[0], 'fcst', 'growth')! - (850 / 800 - 1)) < 1e-9);
@@ -73,7 +72,7 @@ test('파레토 등급: 경계를 넘기는 항목까지 핵심, 0 이하는 손
   assert.equal(rows[1].cum, 1);
 });
 
-test('순매출 = 총매출 − 장려금·일반비, 기준 금액 이상이 ↑', () => {
+test('순매출 = 총매출 − 장려금, 기준 금액 이상이 ↑', () => {
   const units = toUnits(products, 'product');
   assert.equal(unitValue(units[0], 'fcst', 'net'), 550); // 600 − 50
   assert.equal(unitValue(units[1], 'fcst', 'net'), 250); // 판관비 미입력이면 총매출과 같다

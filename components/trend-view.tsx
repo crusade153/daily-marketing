@@ -83,7 +83,7 @@ export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[
   const [bridgeIdx, setBridgeIdx] = useState(lastActual >= 1 ? lastActual : n - 1);
 
   const focus = groups.find((g) => g.key === focusKey) ?? null;
-  const missing = (i: number) => months[i].filled === 0 && !months[i].channel;
+  const missing = (i: number) => months[i].filled === 0;
   const ytdLabel = actualIdx.length ? `${monthLabel(months[actualIdx[0]].ym)}~${monthLabel(months[lastActual].ym)} 실적` : '';
   const ytd = (list: Amounts[]) => sumAmounts(actualIdx.map((i) => list[i]));
 
@@ -368,6 +368,15 @@ export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[
           </span>
           <HeatLegend diverging={diverging} cap={cap} metric={metric} />
         </div>
+        <details className="method-note heat-guide">
+          <summary>이 표 읽는 법</summary>
+          <p>
+            칸 하나 = 그 {AXIS_LABEL[axis]}의 그 달 {METRIC_LABEL[metric]} 값입니다. 색은 값 자체의 크기입니다 — 파랑이 진할수록 크고(이익·이익률이 높음),
+            {diverging ? ' 빨강이 진할수록 손실이 큽니다(0 미만).' : ' 연할수록 작습니다.'} 극단값 하나가 색을 흐리지 않도록 상위 10% 값부터는 같은 가장 진한 색입니다.
+            ① 가로로 읽으면 한 {AXIS_LABEL[axis]}의 월별 흐름(색이 진해지면 개선, 연해지거나 빨개지면 악화), ② 세로로 읽으면 같은 달 {AXIS_LABEL[axis]}끼리 비교입니다.
+            행 이름을 누르면 위 차트가 그 행으로 바뀌고, 월 머리글을 누르면 ‘전월 대비 변동’의 기준월이 바뀝니다. 마지막 달은 월말 예상입니다.
+          </p>
+        </details>
         <div className="data-scroll">
           <table className="dtable">
             <thead>
@@ -385,8 +394,8 @@ export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[
                       {monthLabel(m.ym)}
                       {m.kind === 'fcst' && <span className="ml-0.5 text-[10px]">예상</span>}
                       {needsInput(metric) && (
-                        <span className={`block text-[10px] font-normal ${m.filled || m.channel ? '' : 'text-neg'}`}>
-                          {m.filled ? `입력 ${m.filled}/${m.l1Total}` : m.channel ? '채널 장려금' : '미입력'}
+                        <span className={`block text-[10px] font-normal ${m.filled ? '' : 'text-neg'}`}>
+                          {m.filled ? `입력 ${m.filled}/${m.chTotal}` : '미입력'}
                         </span>
                       )}
                     </button>

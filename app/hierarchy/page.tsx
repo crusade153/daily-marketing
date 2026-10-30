@@ -13,12 +13,19 @@ export default async function HierarchyPage({
   return (
     <div className="data-page">
       <div className="page-intro">
-        <h1>손익 분석</h1>
-        <p>CM·PM·제품라인·품목·브랜드 순으로 손익을 좁혀 봅니다. 제품 목록에서는 제품별 판매단가까지 확인합니다.</p>
-        <details className="method-note"><summary>비용 배부·단가 기준</summary><p>장려금·일반비는 제품계층 LV1(브랜드) 입력 금액을 제품별 매출 비중으로 배부합니다. 분석 축과 관계없이 합계는 동일하며, 누계에는 월 입력값 × 월 진행률을 적용합니다. 판매단가 = 제품별 매출 ÷ 판매수량(EA). 전월비는 매출은 증감률, GP·OP는 이익률 차이(%p)입니다.</p></details>
+        <h1>제품별 손익 분석</h1>
+        <p>CM · PM · 제품라인 · 제품 순으로 목표 대비 실적을 좁혀 봅니다. 계층6에 채널을 넣으면 제품을 고객그룹3별로 나눠 봅니다.</p>
+        <details className="method-note"><summary>손익·배부·목표 기준</summary><p>순매출 = 총매출 − 장려금, 매출총이익(GP) = 순매출 − 매출원가, 영업이익(OP) = GP − 일반비. GP율·OP율은 순매출 대비입니다. 장려금·일반비는 고객그룹3별 입력 금액을 그 채널의 제품별 총매출 비중으로 배부하며, 누계에는 월 입력값 × 월 진행률을 적용합니다. 목표는 제품 × 월(구글 시트 target_product)이고 목표비 = 실적 ÷ 목표입니다. 채널로 나눈 단계에는 목표가 없습니다(제품 목표를 채널로 나누지 않음). 판가는 제품은 총매출 ÷ 수량, 묶음은 동일제품 단가 변동률(전월 수량 고정)입니다.</p></details>
       </div>
       <Notices d={d} />
-      <PnlExplorer rows={d.rows} curYm={d.curYm} prevYm={d.prevYm} initialView={view === 'product' ? 'product' : 'pivot'} />
+      <PnlExplorer
+        rows={d.rows}
+        curYm={d.curYm}
+        prevYm={d.prevYm}
+        progressRate={d.progress.rate}
+        targets={d.targets}
+        initialView={view === 'product' ? 'product' : 'pivot'}
+      />
     </div>
   );
 }

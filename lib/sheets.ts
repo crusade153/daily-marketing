@@ -15,14 +15,15 @@ export interface SheetRow {
 export const TABS = {
   // 실제 시트는 1행에 안내 문구, 2행에 헤더가 있다. 읽을 때는 헤더 이름으로 열을 찾는다 (data.ts readProductMap)
   productMap: { name: 'product_map', header: ['MATNR', '제품명', 'CM1', 'CM2', 'CM3', '카테고리', '담당자', '기타'] },
-  manualInput: {
-    name: 'manual_input_lv1', // 2026-10-13 입력 단위를 PRDHA2 → LV1로 바꾸며 새 탭 (예전 manual_input 탭은 비어 있음)
-    header: ['YYYYMM', '제품계층LV1', '제품계층LV1명', '장려금', '일반비', '수정일시', '수정자'],
-  },
-  // 제품라인(product_map 카테고리)별 CM·PM 이름. 대시보드 '제품 매핑'에서 저장, 첫 저장 때 탭 자동 생성
+  // 예전 LV1 입력 탭 manual_input_lv1은 2026-10-30부터 쓰지 않는다 (비용 입력을 고객그룹3으로 일원화, 시트 탭은 보관)
+  // 제품라인(product_map 카테고리)별 CM·PM 이름. '[CM1]'처럼 대괄호 행은 CM 표시별 기본 이름. 첫 저장 때 탭 자동 생성
   lineOwner: { name: 'line_owner', header: ['제품라인', 'CM명', 'PM명', '수정일시', '수정자'] },
-  // 장려금 고객그룹3(채널) 입력. 입력한 달은 LV1 장려금 대신 이 금액을 채널 내 제품 매출 비중으로 배부
-  channelInput: { name: 'manual_input_channel', header: ['YYYYMM', '고객그룹3', '고객그룹3명', '장려금', '수정일시', '수정자'] },
+  // 장려금·일반비 고객그룹3(채널) × 월 금액. 일반비는 2026-10-30에 뒤(G열)에 추가 — 기존 행 위치를 지키려고 끝에 둔다
+  channelInput: { name: 'manual_input_channel', header: ['YYYYMM', '고객그룹3', '고객그룹3명', '장려금', '수정일시', '수정자', '일반비'] },
+  // 고객그룹3별 영업담당자 (채널당 한 명)
+  channelOwner: { name: 'channel_owner', header: ['고객그룹3', '고객그룹3명', '영업담당자', '수정일시', '수정자'] },
+  // 제품 × 월 목표 (원). 사용자가 시트에서 직접 입력, 대시보드는 제품 행만 채워 준다
+  target: { name: 'target_product', header: ['YYYYMM', 'MATNR', '제품명', '매출목표', 'GP목표', 'OP목표'] },
 } as const;
 
 type Tab = (typeof TABS)[keyof typeof TABS];
@@ -42,12 +43,25 @@ function sheetsStore(spreadsheetId: string): Store {
   if (!email || !key) throw new Error('시트 서비스계정 자격증명이 없습니다.');
   const auth = new google.auth.JWT({ email, key, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
   const api: sheets_v4.Sheets = google.sheets({ version: 'v4', auth });
-  // 같은 탭을 동시에 읽어도 생성 요청은 한 번만 나가도록 진행 중인 Promise를 공유한다
+  // 시트 읽기 한도(분당 60회)를 넘지 않도록: 탭 목록은 프로세스당 한 번, 같은 탭을 동시에 읽으면 요청 하나를 공유한다
   const ensured = new Map<string, Promise<void>>();
+  const inflight = new Map<string, Promise<SheetRow[]>>();
+  let titlesP: Promise<Set<string>> | null = null;
+  const titles = () => {
+    titlesP ??= api.spreadsheets
+      .get({ spreadsheetId, fields: 'sheets.properties.title' })
+      .then((meta) => new Set((meta.data.sheets ?? []).map((s) => s.properties?.title ?? '')))
+      .catch((e) => {
+        titlesP = null;
+        throw e;
+      });
+    return titlesP;
+  };
 
+  /** 쓰기 전에만 탭을 만든다 (읽기는 탭이 없으면 빈 목록) */
   async function createIfMissing(tab: Tab) {
-    const meta = await api.spreadsheets.get({ spreadsheetId, fields: 'sheets.properties.title' });
-    if (meta.data.sheets?.some((s) => s.properties?.title === tab.name)) return;
+    const known = await titles();
+    if (known.has(tab.name)) return;
     try {
       await api.spreadsheets.batchUpdate({
         spreadsheetId,
@@ -55,9 +69,13 @@ function sheetsStore(spreadsheetId: string): Store {
       });
     } catch (e) {
       // 다른 인스턴스가 먼저 만든 경우
-      if (String((e as Error).message).includes('already exists')) return;
+      if (String((e as Error).message).includes('already exists')) {
+        known.add(tab.name);
+        return;
+      }
       throw e;
     }
+    known.add(tab.name);
     await api.spreadsheets.values.update({
       spreadsheetId,
       range: `${tab.name}!A1`,
@@ -80,14 +98,21 @@ function sheetsStore(spreadsheetId: string): Store {
 
   return {
     kind: 'sheets',
-    async read(tab) {
-      await ensure(tab);
-      const res = await api.spreadsheets.values.get({
-        spreadsheetId,
-        range: `${tab.name}!A2:${colLetter(tab.header.length)}`,
-        valueRenderOption: 'UNFORMATTED_VALUE',
-      });
-      return (res.data.values ?? []).map((values, i) => ({ rowNumber: i + 2, values: values as Cell[] }));
+    read(tab) {
+      let p = inflight.get(tab.name);
+      if (!p) {
+        p = (async () => {
+          if (!(await titles()).has(tab.name)) return [];
+          const res = await api.spreadsheets.values.get({
+            spreadsheetId,
+            range: `${tab.name}!A2:${colLetter(tab.header.length)}`,
+            valueRenderOption: 'UNFORMATTED_VALUE',
+          });
+          return (res.data.values ?? []).map((values, i) => ({ rowNumber: i + 2, values: values as Cell[] }));
+        })().finally(() => inflight.delete(tab.name));
+        inflight.set(tab.name, p);
+      }
+      return p;
     },
     async update(tab, rows) {
       if (!rows.length) return;

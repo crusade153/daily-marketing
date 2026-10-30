@@ -2,12 +2,26 @@ import 'server-only';
 import { unstable_cache } from 'next/cache';
 import { runQuery } from './bigquery';
 import { getPeriods, monthLabel, progressOf, yearStartOf, ymRange, type Periods } from './period';
-import { applyLineOwners, buildMonthRows, buildRows, lv1InputsFor, ORPHAN_NAME, spreadChannel, type Axis, type ChannelSpread } from './pnl';
+import { applyLineOwners, buildMonthRows, buildRows, ORPHAN_NAME, type Axis } from './pnl';
 import { buildPriceTrend, type PriceItem, type PriceTrend } from './price';
 import { getStore, storageKind, TABS, type Cell } from './sheets';
-import { SEG_PERIODS, type SegPeriod, type SegProduct } from './segment';
+import { SEG_PERIODS, type SegAmounts, type SegPeriod, type SegProduct } from './segment';
 import { aggregateTrend, toMonthRows, type MonthBlock, type TrendData } from './trend';
-import type { ChannelInput, ChannelSale, DailyFact, DashboardData, Hierarchy, LineOwner, ManualInput, MaterialFact, MonthFact, MonthRow, ProductMap } from './types';
+import type {
+  ChannelFact,
+  ChannelInput,
+  ChannelOwner,
+  DailyFact,
+  DashboardData,
+  Hierarchy,
+  LineOwner,
+  MaterialFact,
+  MonthFact,
+  MonthRow,
+  ProductMap,
+  Target,
+  TargetMap,
+} from './types';
 
 // 원천: CO-PA (GL 대사 검증된 실제원가 VV_COGS_A, 총매출 VV101). 당월·전월·3개월 원가를 같은 원천으로 맞춘다.
 // 표준원가 필드(VV_COGS_S, VV2xx)는 2026-04 이후 부풀려져 있어 쓰지 않는다.
@@ -193,16 +207,30 @@ const cachedMonthly = unstable_cache(async (today: string) => queryMonthly(getPe
   tags: ['bq'],
 });
 
-/** 올해 1월 ~ 오늘 제품 × 고객그룹3 월 매출. 캐시 한도(2MB) 때문에 [제품, 채널 순번, 월 순번, 매출] 배열로 담는다 */
-export interface ChannelSalesRaw {
+/**
+ * 제품 × 고객그룹3 월 실적 (매출·수량·실제원가). 고객그룹3은 SD_KNVV (고객·판매조직·유통경로).
+ * CO-PA 고객(KNDNR)과 100% 연결됨 (2026-10-30 확인). 캐시 항목 한도(2MB) 때문에 6개월씩 나눠 담고
+ * [제품 순번, 채널 순번, 월 순번, 매출, 수량, 원가] 숫자 배열로 줄인다.
+ */
+interface ChannelRaw {
   months: string[];
+  mats: string[];
   chs: { code: string; name: string }[];
-  rows: [string, number, number, number][];
+  rows: [number, number, number, number, number, number][];
 }
 
-async function queryChannelSales(p: Periods): Promise<ChannelSalesRaw> {
-  const months = ymRange(yearStartOf(p.curYm), p.curYm);
-  // 고객그룹3은 SD_KNVV (고객·판매조직·유통경로). CO-PA 고객(KNDNR)과 100% 연결됨 (2026-10-30 확인)
+const CHANNEL_CHUNK = 6;
+
+/** 채널 실적이 필요한 달: 올해 1월(또는 1월이면 전월 12월) ~ 당월 */
+function channelMonths(p: Periods): string[] {
+  const start = yearStartOf(p.curYm);
+  return ymRange(p.prevYm < start ? p.prevYm : start, p.curYm);
+}
+
+async function queryChannel(p: Periods, part: number): Promise<ChannelRaw> {
+  const months = channelMonths(p).slice(part * CHANNEL_CHUNK, (part + 1) * CHANNEL_CHUNK);
+  if (!months.length) return { months, mats: [], chs: [], rows: [] };
+  const lastEnd = `${months[months.length - 1]}31`;
   const rows = await runQuery<Record<string, unknown>>(
     `
     WITH k AS (
@@ -210,67 +238,72 @@ async function queryChannelSales(p: Periods): Promise<ChannelSalesRaw> {
       FROM ${KNVV} GROUP BY 1, 2, 3
     )
     SELECT IFNULL(c.ARTNR, '') AS matnr, SUBSTR(c.BUDAT, 1, 6) AS ym,
-      IFNULL(NULLIF(k.ch, ''), '-') AS ch, ANY_VALUE(IFNULL(k.cht, '(미지정)')) AS cht, ROUND(SUM(c.VV101)) AS sales
+      IFNULL(NULLIF(k.ch, ''), '-') AS ch, ANY_VALUE(IFNULL(k.cht, '(미지정)')) AS cht,
+      ROUND(SUM(c.VV101)) AS s, ROUND(SUM(c.ABSMG_EA), 3) AS q, ROUND(SUM(c.VV_COGS_A)) AS g
     FROM ${COPA} c
     LEFT JOIN k ON k.KUNNR = c.KNDNR AND k.VKORG = c.VKORG AND k.VTWEG = c.VTWEG
-    WHERE ${COPA_FILTER} AND c.BUDAT BETWEEN @start AND @today
+    WHERE ${COPA_FILTER} AND c.BUDAT BETWEEN @start AND @end
     GROUP BY 1, 2, 3
-    HAVING sales != 0
+    HAVING s != 0 OR q != 0 OR g != 0
     `,
-    { start: `${months[0]}01`, today: p.today },
+    { start: `${months[0]}01`, end: lastEnd < p.today ? lastEnd : p.today },
   );
+  const matIdx = new Map<string, number>();
   const chIdx = new Map<string, number>();
-  const chs: ChannelSalesRaw['chs'] = [];
-  const out: ChannelSalesRaw['rows'] = [];
+  const raw: ChannelRaw = { months, mats: [], chs: [], rows: [] };
   for (const r of rows) {
+    const matnr = str(r.matnr);
+    let pi = matIdx.get(matnr);
+    if (pi == null) {
+      pi = raw.mats.push(matnr) - 1;
+      matIdx.set(matnr, pi);
+    }
     const code = str(r.ch);
     let ci = chIdx.get(code);
     if (ci == null) {
-      ci = chs.push({ code, name: str(r.cht) || code }) - 1;
+      ci = raw.chs.push({ code, name: str(r.cht) || code }) - 1;
       chIdx.set(code, ci);
     }
     const mi = months.indexOf(str(r.ym));
-    if (mi >= 0) out.push([str(r.matnr), ci, mi, num(r.sales)]);
+    if (mi >= 0) raw.rows.push([pi, ci, mi, num(r.s), num(r.q), num(r.g)]);
   }
-  return { months, chs, rows: out };
+  return raw;
 }
 
-const cachedChannelSales = unstable_cache(async (today: string) => queryChannelSales(getPeriods(today)), ['copa-channel-v1'], {
+const cachedChannel = unstable_cache(async (today: string, part: number) => queryChannel(getPeriods(today), part), ['copa-channel-v2'], {
   revalidate: 3600,
   tags: ['bq'],
 });
 
-/** 한 달의 제품 × 고객그룹3 매출 */
-function channelSalesOf(raw: ChannelSalesRaw, ym: string): ChannelSale[] {
-  const mi = raw.months.indexOf(ym);
-  return raw.rows.filter((r) => r[2] === mi).map(([matnr, ci, , sales]) => ({ matnr, ch: raw.chs[ci].code, sales }));
-}
-
-/** 입력 화면용: 고객그룹3별 월 매출 */
-export async function getChannelTotals(today?: string) {
+/** 월 → 제품 × 채널 실적 */
+async function getChannelFacts(today: string): Promise<Map<string, ChannelFact[]>> {
   const p = getPeriods(today);
-  const raw = await cachedChannelSales(p.today);
-  const items = raw.chs.map((c) => ({ code: c.code, name: c.name, sales: {} as Record<string, number> }));
-  for (const [, ci, mi, s] of raw.rows) {
-    const ym = raw.months[mi];
-    items[ci].sales[ym] = (items[ci].sales[ym] ?? 0) + s;
+  const months = channelMonths(p);
+  const parts = Math.ceil(months.length / CHANNEL_CHUNK);
+  const raws = await Promise.all(Array.from({ length: parts }, (_, i) => cachedChannel(p.today, i)));
+  const out = new Map<string, ChannelFact[]>(months.map((m) => [m, []]));
+  for (const raw of raws) {
+    for (const [pi, ci, mi, sales, qty, cogs] of raw.rows) {
+      const ch = raw.chs[ci];
+      out.get(raw.months[mi])?.push({ matnr: raw.mats[pi], ch: ch.code, cht: ch.name, sales, qty, cogs });
+    }
   }
-  return items;
-}
-
-/** 채널 장려금 입력이 있는 달만 배부를 계산한다 (입력이 없으면 BigQuery를 부르지 않음) */
-async function channelSpreads(today: string, inputs: ChannelInput[], yms: string[]): Promise<Map<string, ChannelSpread>> {
-  const used = yms.filter((ym) => inputs.some((i) => i.ym === ym && i.incentive));
-  const out = new Map<string, ChannelSpread>();
-  if (!used.length) return out;
-  const raw = await cachedChannelSales(today);
-  for (const ym of used) out.set(ym, spreadChannel(inputs.filter((i) => i.ym === ym), channelSalesOf(raw, ym)));
   return out;
 }
 
-export async function getDaily(today?: string) {
+/** 입력 화면용: 고객그룹3별 월 매출 (마감월 실적, 당월 누계) */
+export async function getChannelTotals(today?: string) {
   const p = getPeriods(today);
-  return { periods: p, daily: await cachedDaily(p.today) };
+  const facts = await getChannelFacts(p.today);
+  const items = new Map<string, { code: string; name: string; sales: Record<string, number> }>();
+  for (const [ym, list] of facts) {
+    for (const f of list) {
+      const it = items.get(f.ch) ?? { code: f.ch, name: f.cht, sales: {} };
+      it.sales[ym] = (it.sales[ym] ?? 0) + f.sales;
+      items.set(f.ch, it);
+    }
+  }
+  return [...items.values()];
 }
 
 // ── 시트(수기 데이터) ──────────────────────────────────────────
@@ -312,27 +345,8 @@ async function readProductMap(): Promise<ProductMap[]> {
     .filter((m) => m.matnr && m.matnr !== 'MATNR');
 }
 
-async function readManualInputs(): Promise<ManualInput[]> {
-  const rows = await getStore().read(TABS.manualInput);
-  return rows
-    .map(({ values: v }) => ({
-      ym: toStr(v[0]),
-      l1: toStr(v[1]),
-      l1t: toStr(v[2]),
-      incentive: toNum(v[3]),
-      general: toNum(v[4]),
-      updatedAt: toStr(v[5]),
-      updatedBy: toStr(v[6]),
-    }))
-    .filter((m) => m.ym && m.l1);
-}
-
 // 시트를 직접 고친 경우를 위해 5분 주기로도 갱신. 앱에서 저장하면 updateTag('manual')로 즉시 갱신.
 export const getProductMap = unstable_cache(readProductMap, ['product-map-v3'], { revalidate: 300, tags: ['manual'] });
-export const getManualInputs = unstable_cache(readManualInputs, ['manual-input-lv1-v1'], {
-  revalidate: 300,
-  tags: ['manual'],
-});
 
 async function readLineOwners(): Promise<LineOwner[]> {
   const rows = await getStore().read(TABS.lineOwner);
@@ -348,7 +362,27 @@ async function readLineOwners(): Promise<LineOwner[]> {
 }
 export const getLineOwners = unstable_cache(readLineOwners, ['line-owner-v1'], { revalidate: 300, tags: ['manual'] });
 
+async function readChannelOwners(): Promise<ChannelOwner[]> {
+  const rows = await getStore().read(TABS.channelOwner);
+  return rows
+    .map(({ values: v }) => ({
+      ch: toStr(v[0]),
+      cht: toStr(v[1]),
+      rep: toStr(v[2]),
+      updatedAt: toStr(v[3]),
+      updatedBy: toStr(v[4]),
+    }))
+    .filter((c) => c.ch);
+}
+export const getChannelOwners = unstable_cache(readChannelOwners, ['channel-owner-v1'], { revalidate: 300, tags: ['manual'] });
+
+/** 채널 → 영업담당자 */
+async function getRepMap(): Promise<Map<string, string>> {
+  return new Map((await getChannelOwners()).filter((c) => c.rep).map((c) => [c.ch, c.rep]));
+}
+
 async function readChannelInputs(): Promise<ChannelInput[]> {
+  // 열: YYYYMM · 고객그룹3 · 고객그룹3명 · 장려금 · 수정일시 · 수정자 · 일반비 (일반비는 뒤에 추가된 열)
   const rows = await getStore().read(TABS.channelInput);
   return rows
     .map(({ values: v }) => ({
@@ -358,12 +392,41 @@ async function readChannelInputs(): Promise<ChannelInput[]> {
       incentive: toNum(v[3]),
       updatedAt: toStr(v[4]),
       updatedBy: toStr(v[5]),
+      general: toNum(v[6]),
     }))
     .filter((c) => c.ym && c.ch);
 }
-export const getChannelInputs = unstable_cache(readChannelInputs, ['manual-input-channel-v1'], { revalidate: 300, tags: ['manual'] });
+export const getChannelInputs = unstable_cache(readChannelInputs, ['manual-input-channel-v2'], { revalidate: 300, tags: ['manual'] });
 
-/** 손익 계산에 쓰는 품목 매핑: 시트 product_map + 제품라인별 CM·PM 이름 */
+async function readTargets(): Promise<Target[]> {
+  const rows = await getStore().read(TABS.target);
+  return rows
+    .map(({ values: v }) => ({
+      ym: toStr(v[0]).replace(/\D/g, '').slice(0, 6),
+      matnr: toStr(v[1]),
+      sales: toNum(v[3]),
+      gp: toNum(v[4]),
+      op: toNum(v[5]),
+    }))
+    .filter((t) => t.ym.length === 6 && t.matnr);
+}
+export const getTargets = unstable_cache(readTargets, ['target-product-v1'], { revalidate: 300, tags: ['manual'] });
+
+/** 그 달 제품 목표 (같은 제품이 여러 줄이면 합산) */
+export function targetMapOf(targets: Target[], ym: string): TargetMap {
+  const out: TargetMap = {};
+  for (const t of targets) {
+    if (t.ym !== ym) continue;
+    const v = out[t.matnr] ?? [0, 0, 0];
+    v[0] += t.sales;
+    v[1] += t.gp;
+    v[2] += t.op;
+    out[t.matnr] = v;
+  }
+  return out;
+}
+
+/** 손익 계산에 쓰는 품목 매핑: 시트 product_map + 제품라인·CM 표시별 CM·PM 이름 */
 async function getEffectiveMap(): Promise<ProductMap[]> {
   const [maps, lines] = await Promise.all([getProductMap(), getLineOwners()]);
   return applyLineOwners(maps, lines);
@@ -376,16 +439,21 @@ export async function getFacts(today?: string) {
   return { periods: p, facts: await cachedMaterials(p.today) };
 }
 
+const filledCount = (inputs: ChannelInput[], ym: string) => inputs.filter((i) => i.ym === ym && (i.incentive || i.general)).length;
+const channelCount = (rows: { ch: string; name: string }[], sales: (r: { ch: string; name: string }) => number) =>
+  new Set(rows.filter((r) => r.name !== ORPHAN_NAME && sales(r)).map((r) => r.ch)).size;
+
 export async function getDashboard(today?: string): Promise<DashboardData> {
   const p = getPeriods(today);
-  const [facts, daily, maps, inputs, chInputs] = await Promise.all([
+  const [facts, daily, maps, inputs, chFacts, reps, targets] = await Promise.all([
     cachedMaterials(p.today),
     cachedDaily(p.today),
     getEffectiveMap(),
-    getManualInputs(),
     getChannelInputs(),
+    getChannelFacts(p.today),
+    getRepMap(),
+    getTargets(),
   ]);
-  const spreads = await channelSpreads(p.today, chInputs, [p.curYm, p.prevYm]);
 
   const curDates = daily.filter((d) => d.date >= p.curStart).map((d) => d.date);
   const dataDate = curDates.length ? curDates.reduce((a, b) => (a > b ? a : b)) : null;
@@ -395,14 +463,14 @@ export async function getDashboard(today?: string): Promise<DashboardData> {
   const prevInputs = inputs.filter((i) => i.ym === p.prevYm);
   const rows = buildRows({
     facts,
+    cur: chFacts.get(p.curYm) ?? [],
+    prev: chFacts.get(p.prevYm) ?? [],
     maps,
-    // 고객그룹3 장려금을 입력한 달은 LV1 장려금을 빼고 채널 배부를 쓴다
-    curInputs: lv1InputsFor(inputs, chInputs, p.curYm),
-    prevInputs: lv1InputsFor(inputs, chInputs, p.prevYm),
+    reps,
+    curInputs,
+    prevInputs,
     elapsed: progress.elapsed,
     daysInMonth: p.daysInMonth,
-    curChannel: spreads.get(p.curYm),
-    prevChannel: spreads.get(p.prevYm),
   }).filter((r) => r.mtd.sales || r.prev.sales || r.prev.cogs || r.fcst.incentive || r.fcst.general || r.prev.incentive || r.prev.general);
 
   const coverage = { unitSales: 0, rateSales: 0, noneSales: 0 };
@@ -411,9 +479,6 @@ export async function getDashboard(today?: string): Promise<DashboardData> {
     else if (r.costMethod === 'rate') coverage.rateSales += r.mtd.sales;
     else coverage.noneSales += r.mtd.sales;
   }
-
-  const l1Set = new Set(rows.filter((r) => r.mtd.sales || r.prev.sales).map((r) => r.l1));
-  const filled = (list: ManualInput[]) => list.filter((i) => i.incentive || i.general).length;
 
   return {
     curYm: p.curYm,
@@ -424,40 +489,34 @@ export async function getDashboard(today?: string): Promise<DashboardData> {
     rows,
     coverage,
     inputStatus: {
-      l1Total: l1Set.size,
-      curFilled: filled(curInputs),
-      prevFilled: filled(prevInputs),
-      curChannel: spreads.has(p.curYm),
-      prevChannel: spreads.has(p.prevYm),
+      chTotal: new Set(rows.filter((r) => r.name !== ORPHAN_NAME && (r.mtd.sales || r.prev.sales)).map((r) => r.ch)).size,
+      curFilled: filledCount(inputs, p.curYm),
+      prevFilled: filledCount(inputs, p.prevYm),
     },
+    targets: { cur: targetMapOf(targets, p.curYm), prev: targetMapOf(targets, p.prevYm) },
     storage: storageKind(),
   };
 }
 
 // ── 월별 (올해 1월 ~ 당월) ─────────────────────────────────────
 
-const filledCount = (inputs: ManualInput[], ym: string) =>
-  inputs.filter((i) => i.ym === ym && (i.incentive || i.general)).length;
-const l1Count = (rows: { l1: string; amt: { sales: number } }[]) =>
-  new Set(rows.filter((r) => r.amt.sales).map((r) => r.l1)).size;
-
-/** 마감월은 CO-PA 실적 + 그 달 입력값, 당월은 대시보드의 월 예상. 9월처럼 대시보드 '전월'과 겹치는 달은 같은 원천이라 값이 같다. */
+/** 마감월은 CO-PA 실적 + 그 달 채널 입력값, 당월은 대시보드의 월 예상. 대시보드 '전월'과 겹치는 달은 같은 원천이라 값이 같다. */
 export async function getMonthBlocks(today?: string) {
   const p = getPeriods(today);
   const closed = ymRange(yearStartOf(p.curYm), p.prevYm);
-  const [d, monthly, maps, inputs, chInputs] = await Promise.all([
+  const [d, monthly, maps, inputs, chFacts, reps] = await Promise.all([
     getDashboard(today),
     closed.length ? cachedMonthly(p.today).then(expandMonthly) : Promise.resolve([] as MonthFact[]),
     getEffectiveMap(),
-    getManualInputs(),
     getChannelInputs(),
+    getChannelFacts(p.today),
+    getRepMap(),
   ]);
-  const spreads = await channelSpreads(p.today, chInputs, closed);
-  const hasChannel = (ym: string) => chInputs.some((c) => c.ym === ym && c.incentive);
+  const dims = new Map(monthly.map((f) => [f.matnr, f]));
 
   const blocks: MonthBlock[] = closed.map((ym) => {
-    const rows = buildMonthRows({ ym, facts: monthly, maps, inputs: lv1InputsFor(inputs, chInputs, ym), channel: spreads.get(ym) });
-    return { ym, kind: 'actual', rows, filled: filledCount(inputs, ym), l1Total: l1Count(rows), channel: hasChannel(ym) };
+    const rows = buildMonthRows({ facts: chFacts.get(ym) ?? [], dims, maps, reps, inputs: inputs.filter((i) => i.ym === ym) });
+    return { ym, kind: 'actual', rows, filled: filledCount(inputs, ym), chTotal: channelCount(rows, (r) => (r as MonthRow).amt.sales) };
   });
   const curRows = toMonthRows(d.rows, 'fcst');
   blocks.push({
@@ -465,17 +524,16 @@ export async function getMonthBlocks(today?: string) {
     kind: 'fcst',
     rows: curRows,
     filled: filledCount(inputs, p.curYm),
-    l1Total: l1Count(curRows),
-    channel: hasChannel(p.curYm),
+    chTotal: channelCount(curRows, (r) => (r as MonthRow).amt.sales),
   });
-  return { d, blocks, inputs, chInputs, monthly };
+  return { d, blocks, inputs, monthly };
 }
 
 export async function getTrend(axis: Axis, today?: string): Promise<TrendData> {
   const { d, blocks } = await getMonthBlocks(today);
   return {
     axis,
-    months: blocks.map(({ ym, kind, filled, l1Total, channel }) => ({ ym, kind, filled, l1Total, channel })),
+    months: blocks.map(({ ym, kind, filled, chTotal }) => ({ ym, kind, filled, chTotal })),
     ...aggregateTrend(blocks, axis),
     dataDate: d.dataDate,
   };
@@ -505,12 +563,13 @@ export async function getPriceTrend(today?: string): Promise<PriceTrend> {
     });
   }
   const cur = months.length - 1;
+  // 당월 행은 제품 × 채널이므로 제품별로 더한다
   for (const r of d.rows) {
     if (r.name === ORPHAN_NAME) continue;
     labels.set(r.l1, r.l1t);
     const it = item(r.matnr, r.l1);
-    it.sales[cur] = r.mtd.sales;
-    it.qty[cur] = r.mtd.qty;
+    it.sales[cur] += r.mtd.sales;
+    it.qty[cur] += r.mtd.qty;
   }
   return buildPriceTrend(months, [...items.values()], labels);
 }
@@ -520,32 +579,46 @@ export async function getPriceTrend(today?: string): Promise<PriceTrend> {
 export interface SegmentData {
   products: SegProduct[];
   periods: { id: SegPeriod; label: string; costNote: string | null; compareOnly?: boolean }[];
+  /** 채널 필터 목록 (올해 매출 큰 순) */
+  channels: { code: string; name: string }[];
+  channel: string | null;
   dataDate: string | null;
 }
 
-/** 제품별 기간 금액: 올해 누계(마감월 실적 + 당월 예상), 당월 예상, 전월 실적, 전전월 실적(비교 기준) */
-export async function getSegment(today?: string): Promise<SegmentData> {
+/**
+ * 제품별 기간 금액: 올해 누계(마감월 실적 + 당월 예상), 당월 예상, 전월 실적, 전전월 실적(비교 기준).
+ * channel을 주면 그 고객그룹3 매출·비용만 모은다 (화면 전달량을 줄이려고 서버에서 거른다).
+ */
+export async function getSegment(channel?: string | null, today?: string): Promise<SegmentData> {
   const { d, blocks } = await getMonthBlocks(today);
   const n = blocks.length;
   const prev2 = n >= 3 ? blocks[n - 3] : null;
   const map = new Map<string, SegProduct>();
-  const zero = (): [number, number, number, number] => [0, 0, 0, 0];
+  const chSales = new Map<string, { name: string; sales: number }>();
+  const zero = (): SegAmounts => [0, 0, 0, 0, 0];
   const at = (r: MonthRow) => {
     let p = map.get(r.matnr);
     if (!p) {
-      const { matnr, name, l1, l1t, l2, l2t, l3, l3t, l4, l4t } = r;
-      p = { matnr, name, l1, l1t, l2, l2t, l3, l3t, l4, l4t, a: SEG_PERIODS.map(zero) };
+      const { matnr, name, cm, cmMark, owner, category, l1t } = r;
+      p = { matnr, name, cm, cmMark, owner, category, l1t, a: SEG_PERIODS.map(zero) };
       map.set(r.matnr, p);
     }
     return p;
   };
   const add = (r: MonthRow, period: SegPeriod) => {
     if (r.name === ORPHAN_NAME) return;
+    if (period === 'ytd') {
+      const c = chSales.get(r.ch) ?? { name: r.cht, sales: 0 };
+      c.sales += r.amt.sales;
+      chSales.set(r.ch, c);
+    }
+    if (channel && r.ch !== channel) return;
     const v = at(r).a[SEG_PERIODS.indexOf(period)];
     v[0] += r.amt.sales;
     v[1] += r.amt.qty;
     v[2] += r.amt.cogs;
-    v[3] += r.amt.incentive + r.amt.general;
+    v[3] += r.amt.incentive;
+    v[4] += r.amt.general;
   };
   for (const b of blocks) for (const r of b.rows) add(r, 'ytd');
   for (const r of toMonthRows(d.rows, 'fcst')) add(r, 'fcst');
@@ -554,13 +627,13 @@ export async function getSegment(today?: string): Promise<SegmentData> {
 
   // 화면 전달량을 줄이려고 원 단위로 반올림 (예상치는 소수가 길다)
   const products = [...map.values()]
-    .map((p) => ({ ...p, a: p.a.map((v) => v.map(Math.round) as [number, number, number, number]) }))
+    .map((p) => ({ ...p, a: p.a.map((v) => v.map(Math.round) as SegAmounts) }))
     .filter((p) => p.a.some((v) => v[0] || v[2]));
 
   const cur = blocks[n - 1];
   const prevBlock = n >= 2 ? blocks[n - 2] : null;
   const note = (b: MonthBlock | null) =>
-    b && b.filled < b.l1Total ? `${monthLabel(b.ym)} 장려금·일반비 ${b.filled}/${b.l1Total}개 계층 입력` : null;
+    b && b.filled < b.chTotal ? `${monthLabel(b.ym)} 장려금·일반비 ${b.filled}/${b.chTotal}개 채널 입력` : null;
   const ytdMissing = blocks.filter((b) => b.filled === 0).length;
   return {
     products,
@@ -574,6 +647,8 @@ export async function getSegment(today?: string): Promise<SegmentData> {
       { id: 'prev', label: `${monthLabel(d.prevYm)} 실적`, costNote: note(prevBlock) },
       ...(prev2 ? [{ id: 'prev2' as const, label: `${monthLabel(prev2.ym)} 실적`, costNote: note(prev2), compareOnly: true }] : []),
     ],
+    channels: [...chSales].sort((a, b) => b[1].sales - a[1].sales).map(([code, c]) => ({ code, name: c.name })),
+    channel: channel ?? null,
     dataDate: d.dataDate,
   };
 }

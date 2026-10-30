@@ -20,17 +20,21 @@ const DIM_COLS: { header: string; get: (r: RowDims) => string; width: number }[]
   { header: '제품계층 LV3', get: (r) => r.l3t, width: 20 },
   { header: 'LV4코드', get: (r) => r.l4, width: 20 },
   { header: '제품계층 LV4', get: (r) => r.l4t, width: 16 },
-  { header: 'CM', get: (r) => r.cm, width: 10 },
-  { header: '카테고리', get: (r) => r.category, width: 10 },
-  { header: '담당자', get: (r) => r.owner, width: 10 },
+  { header: 'CM', get: (r) => r.cm, width: 12 },
+  { header: '제품라인', get: (r) => r.category, width: 14 },
+  { header: 'PM', get: (r) => r.owner, width: 10 },
+  { header: '고객그룹3코드', get: (r) => r.ch, width: 8 },
+  { header: '채널(고객그룹3)', get: (r) => r.cht, width: 14 },
+  { header: '영업담당자', get: (r) => r.rep, width: 10 },
 ];
 
 const AMT_COLS: { header: string; get: (a: Amounts) => number | null }[] = [
   { header: '수량(EA)', get: (a) => a.qty },
-  { header: '매출', get: (a) => a.sales },
-  { header: '매출원가', get: (a) => a.cogs },
-  { header: '매출이익', get: (a) => metrics(a).gp },
+  { header: '총매출', get: (a) => a.sales },
   { header: '장려금', get: (a) => a.incentive },
+  { header: '순매출', get: (a) => metrics(a).net },
+  { header: '매출원가', get: (a) => a.cogs },
+  { header: '매출총이익', get: (a) => metrics(a).gp },
   { header: '일반비', get: (a) => a.general },
   { header: '영업이익', get: (a) => metrics(a).op },
 ];
@@ -45,7 +49,7 @@ function styleHeader(ws: ExcelJS.Worksheet) {
   ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: ws.columnCount } };
 }
 
-/** 계층별 손익 RAW: 제품 단위 원천. 시트 1 당월·전월, 시트 2 올해 월별(긴 형식), 시트 3 기준 */
+/** 손익 RAW: 제품 × 채널 단위 원천. 시트 1 당월·전월, 시트 2 올해 월별(긴 형식), 시트 3 기준 */
 export async function GET() {
   const { d, blocks } = await getMonthBlocks();
   const cur = monthLabel(d.curYm);
@@ -60,7 +64,7 @@ export async function GET() {
     { key: 'fcst', label: `${cur} 예상` },
     { key: 'prev', label: `${prv} 실적` },
   ] as const;
-  const ws1 = wb.addWorksheet('당월·전월 제품별');
+  const ws1 = wb.addWorksheet('당월·전월 제품×채널');
   ws1.columns = [
     ...DIM_COLS.map((c) => ({ header: c.header, width: c.width })),
     { header: '원가 산출', width: 16 },
@@ -76,7 +80,7 @@ export async function GET() {
   styleHeader(ws1);
 
   // 2. 월별 (제품 × 월, 긴 형식 — 피벗용)
-  const ws2 = wb.addWorksheet('월별 제품별');
+  const ws2 = wb.addWorksheet('월별 제품×채널');
   ws2.columns = [
     { header: '월', width: 9 },
     { header: '구분', width: 8 },
@@ -101,14 +105,16 @@ export async function GET() {
     [`${cur} 매출원가`, `판매수량 × ${d.costYms.map(monthLabel).join('·')} 평균 단위원가. 이력이 없으면 LV2 → LV1 → 전사 원가율 × 매출`],
     [`${cur} 예상`, `누계 ÷ 진행일 × 월 일수`],
     ['마감월', 'CO-PA 실적 매출·실제원가'],
-    ['장려금·일반비', '제품계층 LV1별 월 입력값을 그 LV1 안의 제품 매출(양수) 비중으로 배부. 누계 = 입력값 × 진행률'],
-    ['(매출 없음 · 입력 비용)', '매출이 없는 LV1에 입력된 비용을 담은 행'],
+    ['행 단위', '제품 × 고객그룹3(채널). 채널은 CO-PA 고객(KNDNR·VKORG·VTWEG) → SD_KNVV.KVGR3'],
+    ['손익 구조', '순매출 = 총매출 − 장려금, 매출총이익 = 순매출 − 매출원가, 영업이익 = 매출총이익 − 일반비. 이익률은 순매출 대비'],
+    ['장려금·일반비', '고객그룹3별 월 입력값을 그 채널 안의 제품 총매출(양수) 비중으로 배부. 누계 = 입력값 × 진행률'],
+    ['(매출 없음 · 입력 비용)', '그 달 매출이 없는 채널에 입력된 비용을 담은 행'],
   ];
   notes.forEach((n) => ws3.addRow(n));
   ws3.getColumn(1).font = { bold: true };
 
   const buf = await wb.xlsx.writeBuffer();
-  const name = `계층별손익_RAW_${d.dataDate ?? d.curYm}.xlsx`;
+  const name = `손익_RAW_${d.dataDate ?? d.curYm}.xlsx`;
   return new Response(buf as ArrayBuffer, {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

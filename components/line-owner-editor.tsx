@@ -16,6 +16,8 @@ export interface LineSummary {
   pm: string;
   updatedAt: string;
   updatedBy: string;
+  /** CM 표시별 기본 이름 행 ('[CM1]') — PM 없음 */
+  isMark?: boolean;
 }
 
 type Edit = { cm: string; pm: string };
@@ -50,7 +52,7 @@ export default function LineOwnerEditor({ lines, unlined, curLabel }: { lines: L
     setUser(readLocal('dm-user') ?? '');
   }, []);
 
-  const marks = useMemo(() => [...new Set(lines.map((l) => l.markKey))].sort(), [lines]);
+  const marks = useMemo(() => [...new Set(lines.filter((l) => !l.isMark).map((l) => l.markKey))].sort(), [lines]);
   const valueOf = (l: LineSummary): Edit => edits[l.line] ?? { cm: l.cm, pm: l.pm };
   const changed = lines.filter((l) => {
     const v = valueOf(l);
@@ -70,7 +72,7 @@ export default function LineOwnerEditor({ lines, unlined, curLabel }: { lines: L
   const applyBulk = () => {
     const name = bulkName.trim();
     if (!bulkMark || !name) return;
-    const targets = lines.filter((l) => l.markKey === bulkMark);
+    const targets = lines.filter((l) => !l.isMark && l.markKey === bulkMark);
     setEdits((p) => {
       const next = { ...p };
       for (const l of targets) next[l.line] = { ...(p[l.line] ?? { cm: l.cm, pm: l.pm }), cm: name };
@@ -96,9 +98,9 @@ export default function LineOwnerEditor({ lines, unlined, curLabel }: { lines: L
     <div className="card lo-card">
       <div className="lo-head">
         <div>
-          <h2>제품라인별 CM·PM 담당자</h2>
+          <h2>제품라인별 CM·PM 담당자 (참고)</h2>
           <p>
-            이름을 적으면 손익 분석·월별 추이·ABCD 등급의 CM·PM이 이 이름으로 바뀝니다. 비워 두면 시트의 CM 표시(CM1~CM3)와 담당자 열을 씁니다.
+            분석 화면의 CM은 시트 CM1~CM3 표시, PM은 시트 담당자 열을 그대로 씁니다. 여기 CM명은 참고용으로 시트에만 저장되고, PM명은 시트 담당자가 비어 있는 품목에만 채워집니다.
             {unlined > 0 && ` 제품라인(카테고리)이 비어 있는 품목 ${unlined.toLocaleString()}개는 시트에서 제품라인을 먼저 채워야 합니다.`}
           </p>
         </div>
@@ -153,8 +155,8 @@ export default function LineOwnerEditor({ lines, unlined, curLabel }: { lines: L
               const v = valueOf(l);
               const dirty = v.cm.trim() !== l.cm || v.pm.trim() !== l.pm;
               return (
-                <tr key={l.line} className={dirty ? 'is-dirty' : ''}>
-                  <td className="lo-line" data-label="제품라인">{l.line}</td>
+                <tr key={l.line} className={`${dirty ? 'is-dirty' : ''} ${l.isMark ? 'lo-mark' : ''}`}>
+                  <td className="lo-line" data-label="제품라인">{l.isMark ? `${l.markKey} 기본 이름` : l.line}</td>
                   <td className="num" data-label="제품 수">{l.products.toLocaleString()}</td>
                   <td className="num" data-label="매출(백만원)">{mil(l.sales)}</td>
                   <td className="text-muted" data-label="시트 CM">{l.mark}</td>
@@ -163,7 +165,11 @@ export default function LineOwnerEditor({ lines, unlined, curLabel }: { lines: L
                     <input value={v.cm} onChange={(e) => set(l, 'cm', e.target.value)} placeholder={l.markKey} aria-label={`${l.line} CM명`} />
                   </td>
                   <td data-label="PM명">
-                    <input value={v.pm} onChange={(e) => set(l, 'pm', e.target.value)} placeholder={l.sheetOwner || '이름'} aria-label={`${l.line} PM명`} />
+                    {l.isMark ? (
+                      <span className="text-[11px] text-muted">제품라인별로 입력</span>
+                    ) : (
+                      <input value={v.pm} onChange={(e) => set(l, 'pm', e.target.value)} placeholder={l.sheetOwner || '이름'} aria-label={`${l.line} PM명`} />
+                    )}
                   </td>
                   <td className="lo-meta" data-label="최근 수정">{l.updatedAt ? `${l.updatedAt.slice(5, 16)} · ${l.updatedBy}` : '-'}</td>
                 </tr>

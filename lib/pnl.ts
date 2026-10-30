@@ -1,25 +1,25 @@
-// 손익 순수 계산. BigQuery 품목 집계 + 수기 입력(장려금·일반비) → 시나리오별 품목 손익 행.
-//   매출이익 = 매출 − 매출원가
-//   영업이익 = 매출이익 − 장려금 − 일반비
+// 손익 순수 계산. BigQuery 제품 × 고객그룹3(채널) 실적 + 수기 입력(장려금·일반비) → 시나리오별 손익 행.
+//   순매출 = 총매출 − 장려금
+//   매출총이익(GP) = 순매출 − 매출원가
+//   영업이익(OP) = GP − 일반비.   GP율·OP율의 분모는 순매출 (2026-10-30 사용자 결정)
 //   당월 매출원가 = 당월 수량 × 최근 3개월 평균 단위원가 (이력이 없으면 LV2 → LV1 → 전사 원가율 × 매출)
 //   당월 예상 = 당월 누계 ÷ 진행일 × 월 일수
-//   장려금·일반비 입력값 = 제품계층 LV1의 월 전체 금액. 예상에는 그대로, 누계에는 × 진행률.
-//     LV1 안에서는 품목 매출 비중으로 배분 → LV2~LV4·CM·담당자 등 어느 축으로 묶어도 합계가 같다.
-//   마감월(올해 1월 ~ 전월) = CO-PA 실적 매출·실제원가 + 그 달 입력값
+//   장려금·일반비 입력값 = 고객그룹3(채널)의 월 전체 금액. 예상에는 그대로, 누계에는 × 진행률.
+//     채널 안에서는 제품 총매출 비중으로 배분 → CM·PM·제품라인·제품 등 어느 축으로 묶어도 합계가 같다.
+//   마감월(올해 1월 ~ 전월) = CO-PA 실적 매출·실제원가 + 그 달 채널 입력값
 import type {
   Amounts,
+  ChannelFact,
   ChannelInput,
-  ChannelSale,
   CostMethod,
   Hierarchy,
   LineOwner,
-  ManualInput,
   MaterialFact,
   MaterialRow,
-  MonthFact,
   MonthRow,
   ProductMap,
   RowDims,
+  Scenario,
 } from './types';
 
 export const ZERO: Amounts = { sales: 0, qty: 0, cogs: 0, incentive: 0, general: 0 };
@@ -45,26 +45,62 @@ export function scaleAmounts(a: Amounts, k: number): Amounts {
 }
 
 export interface Metrics extends Amounts {
-  gp: number; // 매출이익
-  gpm: number | null; // 매출이익률
-  op: number; // 영업이익
-  opm: number | null; // 영업이익률
+  net: number; // 순매출 = 총매출 − 장려금
+  gp: number; // 매출총이익 = 순매출 − 매출원가
+  gpm: number | null; // GP율 (순매출 대비)
+  op: number; // 영업이익 = GP − 일반비
+  opm: number | null; // OP율 (순매출 대비)
 }
 
 export function metrics(a: Amounts): Metrics {
-  const gp = a.sales - a.cogs;
-  const op = gp - a.incentive - a.general;
+  const net = a.sales - a.incentive;
+  const gp = net - a.cogs;
+  const op = gp - a.general;
   return {
     ...a,
+    net,
     gp,
-    gpm: a.sales ? gp / a.sales : null,
+    gpm: net ? gp / net : null,
     op,
-    opm: a.sales ? op / a.sales : null,
+    opm: net ? op / net : null,
   };
 }
 
 /** 판매단가(원/EA). 수량·매출이 양수일 때만 — 제품 단위에서만 의미가 있다 */
 export const unitPrice = (a: Pick<Amounts, 'sales' | 'qty'>) => (a.qty > 0 && a.sales > 0 ? a.sales / a.qty : null);
+
+/** 동일제품 비교에서 뺄 단가 비율 (단위·정정 전표로 본다) — lib/price.ts와 같은 기준 */
+const PRICE_RATIO_MIN = 0.2;
+const PRICE_RATIO_MAX = 5;
+
+/**
+ * 동일제품 단가 변동률 (전월 수량 고정, 라스파이레스). 묶음의 평균단가는 제품 구성에 따라 흔들리므로
+ * 같은 제품끼리 전월 대비 단가만 비교한다. 비교할 제품이 없으면 null
+ */
+export function priceChange(rows: Pick<MaterialRow, 'matnr' | 'mtd' | 'fcst' | 'prev'>[], s: Scenario): number | null {
+  if (s === 'prev') return null;
+  const by = new Map<string, { cs: number; cq: number; ps: number; pq: number }>();
+  for (const r of rows) {
+    const v = by.get(r.matnr) ?? { cs: 0, cq: 0, ps: 0, pq: 0 };
+    v.cs += r[s].sales;
+    v.cq += r[s].qty;
+    v.ps += r.prev.sales;
+    v.pq += r.prev.qty;
+    by.set(r.matnr, v);
+  }
+  let num = 0;
+  let den = 0;
+  for (const v of by.values()) {
+    const cur = unitPrice({ sales: v.cs, qty: v.cq });
+    const prev = unitPrice({ sales: v.ps, qty: v.pq });
+    if (cur == null || prev == null) continue;
+    const ratio = cur / prev;
+    if (ratio < PRICE_RATIO_MIN || ratio > PRICE_RATIO_MAX) continue;
+    num += cur * v.pq;
+    den += prev * v.pq;
+  }
+  return den > 0 ? num / den - 1 : null;
+}
 
 /** 예상치 확장 배수. 진행일이 0이면 0 */
 export function forecastFactor(elapsed: number, daysInMonth: number): number {
@@ -106,8 +142,8 @@ export function estimateCogs(f: MaterialFact, rates: RateTable): { cogs: number;
 }
 
 /**
- * LV1 금액을 품목 매출 비중으로 배분한다. 양(+)의 매출만 가중치로 쓴다.
- * 가중치 합이 0이면 배분할 품목이 없으므로 null — 호출부에서 '(매출 없음)' 행으로 받는다.
+ * 금액을 행 매출 비중으로 배분한다. 양(+)의 매출만 가중치로 쓴다.
+ * 가중치 합이 0이면 배분할 행이 없으므로 null — 호출부에서 '(매출 없음)' 행으로 받는다.
  */
 export function allocate(total: number, weights: number[]): number[] | null {
   const pos = weights.map((w) => (w > 0 ? w : 0));
@@ -131,13 +167,22 @@ const CM_COLS = [
 ] as const;
 
 /**
- * CM 축 화면 순서: CM1 → CM2 → CM3 → (CM 이름으로 바꾼 값) → (미매핑) → 기타 → (CM 중복). 사용자 요청.
- * 같은 순번 안에서는 0을 돌려주므로 호출하는 쪽의 매출순 정렬이 그대로 남는다.
+ * CM 화면 순서: CM1 → CM2 → CM3 → (미매핑) → 기타 → (CM 중복). 사용자 요청.
+ * CM 이름으로 바뀐 행도 시트 표시(cmMark)로 순서를 정한다. 같은 순번 안에서는 0 → 호출부의 매출순이 남는다.
  */
-const CM_ORDER = ['CM1', 'CM2', 'CM3', '', UNMAPPED, '기타', CM_DUPLICATE];
-export function cmRank(label: string): number {
-  const i = CM_ORDER.indexOf(label);
-  return i < 0 ? CM_ORDER.indexOf('') : i;
+const CM_ORDER = ['CM1', 'CM2', 'CM3', UNMAPPED, '기타', CM_DUPLICATE];
+export function cmRank(mark: string): number {
+  const i = CM_ORDER.indexOf(mark);
+  return i < 0 ? CM_ORDER.length : i;
+}
+
+/** CM 묶음의 순번: 이름이 CM 표시 자체(CM3·기타 등)면 그 순번, 사람 이름이면 묶인 행에 가장 많은 CM 표시 */
+export function cmGroupRank(label: string, marks: string[]): number {
+  if (CM_ORDER.includes(label)) return cmRank(label);
+  const n = new Map<string, number>();
+  for (const m of marks) n.set(m, (n.get(m) ?? 0) + 1);
+  const top = [...n].sort((a, b) => b[1] - a[1] || cmRank(a[0]) - cmRank(b[0]))[0];
+  return top ? cmRank(top[0]) : CM_ORDER.length;
 }
 
 /** 시트 CM1~CM3·기타 열 중 표시가 된 열 이름. 없으면 미매핑, 둘 이상이면 중복 */
@@ -150,19 +195,23 @@ export function cmOf(m: ProductMap | undefined): string {
 }
 
 /**
- * 제품라인별 CM·PM 이름을 품목 매핑에 입힌다. 이름이 비어 있으면 원래 값(CM1~CM3 표시, 시트 담당자)을 쓴다.
- * 제품라인이 없는 품목은 그대로.
+ * 제품라인 PM명을 품목 매핑에 입힌다. 분석 화면의 CM은 시트 CM1~CM3 표시 그대로 쓰고(2026-10-30 사용자 요청:
+ * 이름까지 나오면 지저분), PM은 시트 담당자 열이 기준 — 담당자가 비어 있을 때만 제품라인 PM명으로 채운다.
+ * 제품라인 CM명(line_owner)은 참고용으로 시트에만 남는다.
  */
 export function applyLineOwners(maps: ProductMap[], lines: LineOwner[]): ProductMap[] {
   const byLine = new Map(lines.map((l) => [l.line, l]));
   return maps.map((m) => {
-    const l = m.category ? byLine.get(m.category) : undefined;
-    if (!l || (!l.cm && !l.pm)) return m;
-    return { ...m, cmName: l.cm || undefined, owner: l.pm || m.owner };
+    const pm = m.category ? byLine.get(m.category)?.pm : undefined;
+    return !m.owner && pm ? { ...m, owner: pm } : m;
   });
 }
 
-function dimsOf(f: Hierarchy & { matnr: string; name: string }, m: ProductMap | undefined): RowDims {
+type ProductDims = Hierarchy & { matnr: string; name: string };
+
+const UNKNOWN_HIER = { l1: '-', l1t: '(미분류)', l2: '-', l2t: '(미분류)', l3: '-', l3t: '(미분류)', l4: '-', l4t: '(미분류)' };
+
+function dimsOf(f: ProductDims, m: ProductMap | undefined, ch: { ch: string; cht: string }, reps: Map<string, string>): RowDims {
   return {
     matnr: f.matnr,
     name: f.name,
@@ -174,95 +223,20 @@ function dimsOf(f: Hierarchy & { matnr: string; name: string }, m: ProductMap | 
     l3t: f.l3t,
     l4: f.l4,
     l4t: f.l4t,
-    cm: m?.cmName || cmOf(m),
+    cm: cmOf(m),
+    cmMark: cmOf(m),
     category: m?.category || UNMAPPED,
     owner: m?.owner || UNMAPPED,
+    ch: ch.ch,
+    cht: ch.cht,
+    rep: reps.get(ch.ch) || UNMAPPED,
   };
 }
 
-/** LV1에 매출 품목이 없을 때 입력 비용을 담는 행 */
-function orphanDims(inp: ManualInput): RowDims {
-  const code = `${inp.l1}:INPUT`;
-  return {
-    matnr: `L1:${inp.l1}`,
-    name: ORPHAN_NAME,
-    l1: inp.l1,
-    l1t: inp.l1t || inp.l1,
-    l2: code,
-    l2t: ORPHAN_NAME,
-    l3: code,
-    l3t: ORPHAN_NAME,
-    l4: code,
-    l4t: ORPHAN_NAME,
-    cm: UNMAPPED,
-    category: UNMAPPED,
-    owner: UNMAPPED,
-  };
-}
-
-function indexByL1(rows: { l1: string }[]) {
-  const m = new Map<string, number[]>();
-  rows.forEach((r, i) => m.set(r.l1, [...(m.get(r.l1) ?? []), i]));
-  return m;
-}
-
-/** LV1 입력값을 그 계층 품목들에 매출 비중으로 나눠 준다. 배분할 품목이 없으면 onOrphan으로 넘긴다. */
-function spreadInputs(
-  inputs: ManualInput[],
-  idxByL1: Map<string, number[]>,
-  weight: (i: number) => number,
-  onRow: (i: number, incentive: number, general: number) => void,
-  onOrphan: (inp: ManualInput) => void,
-) {
-  for (const inp of inputs) {
-    const idx = idxByL1.get(inp.l1) ?? [];
-    const w = idx.map(weight);
-    const inc = allocate(inp.incentive, w);
-    const gen = allocate(inp.general, w);
-    if (inc && gen) idx.forEach((i, j) => onRow(i, inc[j], gen[j]));
-    else onOrphan(inp);
-  }
-}
-
-/** 고객그룹3 장려금을 제품에 나눈 결과. 그 달 그 채널 매출이 없으면 orphans */
-export interface ChannelSpread {
-  byMatnr: Map<string, number>;
-  orphans: ChannelInput[];
-}
-
-/** 고객그룹3 장려금을 그 채널의 그 달 제품 매출(양수) 비중으로 제품에 나눈다 */
-export function spreadChannel(inputs: ChannelInput[], sales: ChannelSale[]): ChannelSpread {
-  const byCh = new Map<string, ChannelSale[]>();
-  for (const s of sales) {
-    const list = byCh.get(s.ch);
-    if (list) list.push(s);
-    else byCh.set(s.ch, [s]);
-  }
-  const byMatnr = new Map<string, number>();
-  const orphans: ChannelInput[] = [];
-  for (const inp of inputs) {
-    if (!inp.incentive) continue;
-    const list = byCh.get(inp.ch) ?? [];
-    const parts = allocate(inp.incentive, list.map((s) => s.sales));
-    if (!parts) {
-      orphans.push(inp);
-      continue;
-    }
-    list.forEach((s, j) => byMatnr.set(s.matnr, (byMatnr.get(s.matnr) ?? 0) + parts[j]));
-  }
-  return { byMatnr, orphans };
-}
-
-/** 그 달에 고객그룹3 장려금 입력이 있으면 LV1 입력의 장려금은 쓰지 않는다 (이중 계상 방지). 일반비는 그대로 */
-export function lv1InputsFor(inputs: ManualInput[], channelInputs: ChannelInput[], ym: string): ManualInput[] {
-  const byChannel = channelInputs.some((c) => c.ym === ym && c.incentive);
-  return inputs.filter((i) => i.ym === ym).map((i) => (byChannel ? { ...i, incentive: 0 } : i));
-}
-
-/** 채널 장려금 중 제품에 붙일 수 없는 금액을 담는 행 (채널별 하나) */
-function channelOrphanDims(ch: string, cht: string): RowDims {
-  const code = `CH:${ch}`;
-  const label = `(채널 장려금) ${cht || ch}`;
+/** 채널 비용 중 그 달 그 채널 매출이 없어 제품에 붙일 수 없는 금액을 담는 행 (채널별 하나) */
+function channelOrphanDims(inp: Pick<ChannelInput, 'ch' | 'cht'>, reps: Map<string, string>): RowDims {
+  const code = `CH:${inp.ch}`;
+  const label = `(채널 비용) ${inp.cht || inp.ch}`;
   return {
     matnr: code,
     name: ORPHAN_NAME,
@@ -275,176 +249,199 @@ function channelOrphanDims(ch: string, cht: string): RowDims {
     l4: code,
     l4t: label,
     cm: UNMAPPED,
+    cmMark: UNMAPPED,
     category: UNMAPPED,
     owner: UNMAPPED,
+    ch: inp.ch,
+    cht: inp.cht || inp.ch,
+    rep: reps.get(inp.ch) || UNMAPPED,
   };
 }
 
-/** 채널 장려금을 행에 더한다. 행이 없는 제품·매출 없는 채널은 extra(채널별 행)로 */
-function addChannel<R extends RowDims>(
+/**
+ * 채널 입력 금액(장려금·일반비)을 그 채널 행들의 매출 비중으로 나눠 add로 넘긴다.
+ * 매출이 없는 채널은 extra의 채널별 보관 행으로.
+ */
+function spreadChannelInputs<R extends RowDims>(
   rows: R[],
-  spread: ChannelSpread | undefined,
+  inputs: ChannelInput[],
+  weight: (r: R) => number,
+  add: (r: R, incentive: number, general: number) => void,
   extra: Map<string, R>,
   make: (d: RowDims) => R,
-  add: (r: R, v: number) => void,
+  reps: Map<string, string>,
 ) {
-  if (!spread) return;
-  const idx = new Map(rows.map((r, i) => [r.matnr, i]));
-  const pseudo = (ch: string, cht: string) => {
-    const d = channelOrphanDims(ch, cht);
+  const byCh = new Map<string, R[]>();
+  for (const r of rows) {
+    const list = byCh.get(r.ch);
+    if (list) list.push(r);
+    else byCh.set(r.ch, [r]);
+  }
+  for (const inp of inputs) {
+    if (!inp.incentive && !inp.general) continue;
+    const list = byCh.get(inp.ch) ?? [];
+    const w = list.map(weight);
+    const inc = allocate(inp.incentive, w);
+    const gen = allocate(inp.general, w);
+    if (inc && gen) {
+      list.forEach((r, j) => add(r, inc[j], gen[j]));
+      continue;
+    }
+    const d = channelOrphanDims(inp, reps);
     let r = extra.get(d.matnr);
     if (!r) {
       r = make(d);
       extra.set(d.matnr, r);
     }
-    return r;
-  };
-  for (const [matnr, v] of spread.byMatnr) {
-    const i = idx.get(matnr);
-    add(i == null ? pseudo('-', '제품 미확인') : rows[i], v);
+    add(r, inp.incentive, inp.general);
   }
-  for (const inp of spread.orphans) add(pseudo(inp.ch, inp.cht), inp.incentive);
 }
 
+const rowKey = (matnr: string, ch: string) => `${matnr}|${ch}`;
+
 export function buildRows(params: {
+  /** 제품 단위: 계층·3개월 원가 이력 */
   facts: MaterialFact[];
+  /** 제품 × 채널: 당월 누계, 전월 실적 */
+  cur: ChannelFact[];
+  prev: ChannelFact[];
   maps: ProductMap[];
-  curInputs: ManualInput[];
-  prevInputs: ManualInput[];
+  reps: Map<string, string>;
+  curInputs: ChannelInput[];
+  prevInputs: ChannelInput[];
   elapsed: number;
   daysInMonth: number;
-  /** 고객그룹3 장려금 배부 (입력한 달만) */
-  curChannel?: ChannelSpread;
-  prevChannel?: ChannelSpread;
 }): MaterialRow[] {
-  const { facts, maps, curInputs, prevInputs, elapsed, daysInMonth, curChannel, prevChannel } = params;
+  const { facts, cur, prev, maps, reps, curInputs, prevInputs, elapsed, daysInMonth } = params;
   const mapBy = new Map(maps.map((m) => [m.matnr, m]));
+  const factBy = new Map(facts.map((f) => [f.matnr, f]));
   const rates = costRates(facts);
   const k = forecastFactor(elapsed, daysInMonth);
   const progress = daysInMonth ? elapsed / daysInMonth : 0;
 
-  const rows: MaterialRow[] = facts.map((f) => {
-    const { cogs, method } = estimateCogs(f, rates);
-    const mtd = { ...ZERO, sales: f.curSales, qty: f.curQty, cogs };
-    return {
-      ...dimsOf(f, mapBy.get(f.matnr)),
-      costMethod: method,
-      mtd,
-      fcst: scaleAmounts(mtd, k),
-      prev: { ...ZERO, sales: f.prevSales, qty: f.prevQty, cogs: f.prevCogs },
-    };
-  });
-
-  const idxByL1 = indexByL1(rows);
-  const pseudo = new Map<string, MaterialRow>();
-  const pseudoRow = (inp: ManualInput): MaterialRow => {
-    const hit = pseudo.get(inp.l1);
-    if (hit) return hit;
-    const r: MaterialRow = { ...orphanDims(inp), costMethod: 'unit', mtd: { ...ZERO }, fcst: { ...ZERO }, prev: { ...ZERO } };
-    pseudo.set(inp.l1, r);
+  const byKey = new Map<string, MaterialRow>();
+  const at = (c: ChannelFact): MaterialRow => {
+    const key = rowKey(c.matnr, c.ch);
+    let r = byKey.get(key);
+    if (!r) {
+      const f = factBy.get(c.matnr);
+      const dims = f ?? { matnr: c.matnr, name: c.matnr, ...UNKNOWN_HIER };
+      r = { ...dimsOf(dims, mapBy.get(c.matnr), c, reps), costMethod: 'none', mtd: { ...ZERO }, fcst: { ...ZERO }, prev: { ...ZERO } };
+      byKey.set(key, r);
+    }
     return r;
   };
+  for (const c of cur) {
+    const r = at(c);
+    const f = factBy.get(c.matnr);
+    const est = f
+      ? estimateCogs({ ...f, curQty: c.qty, curSales: c.sales }, rates)
+      : { cogs: rates.all != null ? c.sales * rates.all : 0, method: rates.all != null ? ('rate' as const) : ('none' as const) };
+    r.costMethod = est.method;
+    r.mtd = { ...ZERO, sales: c.sales, qty: c.qty, cogs: est.cogs };
+    r.fcst = scaleAmounts(r.mtd, k);
+  }
+  for (const c of prev) {
+    const r = at(c);
+    r.prev = { ...ZERO, sales: c.sales, qty: c.qty, cogs: c.cogs };
+    if (r.costMethod === 'none' && !r.mtd.sales) r.costMethod = 'unit'; // 전월만 있는 행은 실제원가
+  }
+  const rows = [...byKey.values()];
 
-  spreadInputs(
+  const extra = new Map<string, MaterialRow>();
+  const make = (d: RowDims): MaterialRow => ({ ...d, costMethod: 'unit', mtd: { ...ZERO }, fcst: { ...ZERO }, prev: { ...ZERO } });
+  spreadChannelInputs(
+    rows,
     curInputs,
-    idxByL1,
-    (i) => rows[i].mtd.sales,
-    (i, inc, gen) => {
-      rows[i].fcst.incentive += inc;
-      rows[i].fcst.general += gen;
-      rows[i].mtd.incentive += inc * progress;
-      rows[i].mtd.general += gen * progress;
+    (r) => r.mtd.sales,
+    (r, inc, gen) => {
+      r.fcst.incentive += inc;
+      r.fcst.general += gen;
+      r.mtd.incentive += inc * progress;
+      r.mtd.general += gen * progress;
     },
-    (inp) => {
-      const r = pseudoRow(inp);
-      r.fcst.incentive += inp.incentive;
-      r.fcst.general += inp.general;
-      r.mtd.incentive += inp.incentive * progress;
-      r.mtd.general += inp.general * progress;
-    },
+    extra,
+    make,
+    reps,
   );
-
-  spreadInputs(
+  spreadChannelInputs(
+    rows,
     prevInputs,
-    idxByL1,
-    (i) => rows[i].prev.sales,
-    (i, inc, gen) => {
-      rows[i].prev.incentive += inc;
-      rows[i].prev.general += gen;
+    (r) => r.prev.sales,
+    (r, inc, gen) => {
+      r.prev.incentive += inc;
+      r.prev.general += gen;
     },
-    (inp) => {
-      const r = pseudoRow(inp);
-      r.prev.incentive += inp.incentive;
-      r.prev.general += inp.general;
-    },
+    extra,
+    make,
+    reps,
   );
-
-  const chRows = new Map<string, MaterialRow>();
-  const makeCh = (d: RowDims): MaterialRow => ({ ...d, costMethod: 'unit', mtd: { ...ZERO }, fcst: { ...ZERO }, prev: { ...ZERO } });
-  addChannel(rows, curChannel, chRows, makeCh, (r, v) => {
-    r.fcst.incentive += v;
-    r.mtd.incentive += v * progress;
-  });
-  addChannel(rows, prevChannel, chRows, makeCh, (r, v) => {
-    r.prev.incentive += v;
-  });
-
-  return [...rows, ...pseudo.values(), ...chRows.values()];
+  return [...rows, ...extra.values()];
 }
 
-/** 마감월 한 달의 품목 손익. 매출·원가는 CO-PA 실적, 장려금·일반비는 그 달 LV1 입력값을 매출 비중으로 배분. */
+/** 마감월 한 달의 손익 행. 매출·원가는 CO-PA 실적, 장려금·일반비는 그 달 채널 입력값을 채널 안 매출 비중으로 배분. */
 export function buildMonthRows(params: {
-  ym: string;
-  facts: MonthFact[];
+  facts: ChannelFact[];
+  dims: Map<string, ProductDims>;
   maps: ProductMap[];
-  inputs: ManualInput[];
-  /** 고객그룹3 장려금 배부 (그 달에 입력이 있을 때) */
-  channel?: ChannelSpread;
+  reps: Map<string, string>;
+  inputs: ChannelInput[];
 }): MonthRow[] {
-  const { ym, facts, maps, inputs, channel } = params;
+  const { facts, dims, maps, reps, inputs } = params;
   const mapBy = new Map(maps.map((m) => [m.matnr, m]));
   const rows: MonthRow[] = facts
-    .filter((f) => f.sales[ym] || f.cogs[ym] || f.qty[ym])
+    .filter((f) => f.sales || f.cogs || f.qty)
     .map((f) => ({
-      ...dimsOf(f, mapBy.get(f.matnr)),
-      amt: { ...ZERO, sales: f.sales[ym] ?? 0, qty: f.qty[ym] ?? 0, cogs: f.cogs[ym] ?? 0 },
+      ...dimsOf(dims.get(f.matnr) ?? { matnr: f.matnr, name: f.matnr, ...UNKNOWN_HIER }, mapBy.get(f.matnr), f, reps),
+      amt: { ...ZERO, sales: f.sales, qty: f.qty, cogs: f.cogs },
     }));
-
-  const pseudo = new Map<string, MonthRow>();
-  spreadInputs(
+  const extra = new Map<string, MonthRow>();
+  spreadChannelInputs(
+    rows,
     inputs,
-    indexByL1(rows),
-    (i) => rows[i].amt.sales,
-    (i, inc, gen) => {
-      rows[i].amt.incentive += inc;
-      rows[i].amt.general += gen;
+    (r) => r.amt.sales,
+    (r, inc, gen) => {
+      r.amt.incentive += inc;
+      r.amt.general += gen;
     },
-    (inp) => {
-      const r = pseudo.get(inp.l1) ?? { ...orphanDims(inp), amt: { ...ZERO } };
-      r.amt.incentive += inp.incentive;
-      r.amt.general += inp.general;
-      pseudo.set(inp.l1, r);
-    },
+    extra,
+    (d) => ({ ...d, amt: { ...ZERO } }),
+    reps,
   );
-  const chRows = new Map<string, MonthRow>();
-  addChannel(rows, channel, chRows, (d) => ({ ...d, amt: { ...ZERO } }), (r, v) => {
-    r.amt.incentive += v;
-  });
-  return [...rows, ...pseudo.values(), ...chRows.values()];
+  return [...rows, ...extra.values()];
+}
+
+/** 제품 단위로 합친다 (채널 행 → 제품 한 행). 축 값은 첫 행, 채널은 '전체' */
+export function byProduct(rows: MaterialRow[]): MaterialRow[] {
+  const map = new Map<string, MaterialRow>();
+  for (const r of rows) {
+    const p = map.get(r.matnr);
+    if (!p) {
+      map.set(r.matnr, { ...r, ch: '*', cht: '전체', rep: '-', mtd: { ...r.mtd }, fcst: { ...r.fcst }, prev: { ...r.prev } });
+      continue;
+    }
+    p.mtd = addAmounts(p.mtd, r.mtd);
+    p.fcst = addAmounts(p.fcst, r.fcst);
+    p.prev = addAmounts(p.prev, r.prev);
+    if (p.costMethod === 'unit' && r.costMethod !== 'unit') p.costMethod = r.costMethod;
+  }
+  return [...map.values()];
 }
 
 /** 분석 축. 제품계층은 코드로 묶고 이름으로 보여준다 (이름이 같은 다른 계층이 섞이지 않도록) */
-export type Axis = 'l1' | 'l2' | 'l3' | 'l4' | 'cm' | 'category' | 'owner' | 'name';
+export type Axis = 'l1' | 'l2' | 'l3' | 'l4' | 'cm' | 'category' | 'owner' | 'name' | 'ch' | 'rep';
 
 export const AXIS_LABEL: Record<Axis, string> = {
-  l1: '제품계층 LV1',
+  l1: '브랜드',
   l2: '제품계층 LV2',
   l3: '제품계층 LV3',
   l4: '제품계층 LV4',
   cm: 'CM',
-  category: '카테고리',
-  owner: '담당자',
+  category: '제품라인',
+  owner: 'PM',
   name: '제품',
+  ch: '채널',
+  rep: '영업담당자',
 };
 
 export function axisKey(r: RowDims, axis: Axis): string {
@@ -463,6 +460,8 @@ export function axisLabel(r: RowDims, axis: Axis): string {
       return r.l3t;
     case 'l4':
       return r.l4t;
+    case 'ch':
+      return r.cht;
     default:
       return r[axis];
   }
@@ -496,6 +495,13 @@ export function groupBy(rows: MaterialRow[], axis: Axis): Group[] {
     map.set(key, g);
   }
   return [...map.values()];
+}
+
+/** 화면 정렬: CM 축은 CM1·CM2·CM3·(미매핑)·기타 순, 그 안과 다른 축은 매출 큰 순 */
+export function sortGroups<G extends { label: string; rows: { cmMark: string }[] }>(groups: G[], axis: Axis, sales: (g: G) => number): G[] {
+  const ranks = new Map(groups.map((g) => [g, axis === 'cm' ? cmGroupRank(g.label, g.rows.map((r) => r.cmMark)) : 0]));
+  const rank = (g: G) => ranks.get(g) ?? 0;
+  return groups.sort((a, b) => rank(a) - rank(b) || sales(b) - sales(a));
 }
 
 export function totalOf(rows: MaterialRow[]): { mtd: Amounts; fcst: Amounts; prev: Amounts } {

@@ -1,100 +1,151 @@
 'use client';
 
 import { Fragment, useMemo, useState } from 'react';
-import { growth, mil, pct, ppt, tone } from '@/lib/format';
-import { axisKey, cmRank, groupBy, metrics, totalOf, type Axis, type Group } from '@/lib/pnl';
+import { growth, mil, pct, ppt, tone, won } from '@/lib/format';
+import { axisKey, groupBy, metrics, priceChange, sortGroups, totalOf, unitPrice, type Axis, type Group, type Metrics } from '@/lib/pnl';
 import { monthLabel } from '@/lib/period';
-import { SCENARIO_LABEL, type MaterialRow, type Scenario } from '@/lib/types';
+import { SCENARIO_LABEL, type MaterialRow, type Scenario, type TargetMap } from '@/lib/types';
 
-// 손익 분석 화면의 축 이름 (사용자 정의: CM › PM › 제품라인 › 품목 › 브랜드)
-export const PIVOT_LABEL: Record<Axis, string> = {
-  cm: 'CM',
-  owner: 'PM(담당자)',
-  category: '제품라인',
-  l3: '품목(LV3)',
-  l1: '브랜드(LV1)',
-  l2: '제품계층 LV2',
-  l4: '제품계층 LV4',
-  name: '제품',
-};
-const AXES: Axis[] = ['cm', 'owner', 'category', 'l3', 'l1', 'l2', 'l4', 'name'];
-const CODED: Axis[] = ['l1', 'l2', 'l3', 'l4', 'name'];
-const DEPTH = 5;
+export type PivotMode = 'product' | 'channel';
 type Slot = Axis | 'none';
 
-const PRESETS: { label: string; slots: Slot[] }[] = [
-  { label: 'CM › PM › 제품라인 › 품목', slots: ['cm', 'owner', 'category', 'l3', 'none'] },
-  { label: '브랜드 › LV2 › 품목 › LV4', slots: ['l1', 'l2', 'l3', 'l4', 'none'] },
-  { label: 'CM › 브랜드 › 품목', slots: ['cm', 'l1', 'l3', 'none', 'none'] },
-  { label: 'PM › 품목 › 제품', slots: ['owner', 'l3', 'name', 'none', 'none'] },
-];
+// 손익 분석 축 이름. 제품계층 LV 구조는 보여주지 않는다 (2026-10-30 사용자 요청)
+export const PIVOT_LABEL: Partial<Record<Axis, string>> = {
+  cm: 'CM',
+  owner: 'PM',
+  category: '제품라인',
+  name: '제품',
+  ch: '채널(고객그룹3)',
+  l1: '브랜드',
+  rep: '영업담당자',
+};
+
+const MODES: Record<PivotMode, { axes: Axis[]; depth: number; presets: { label: string; slots: Slot[] }[] }> = {
+  product: {
+    axes: ['cm', 'owner', 'category', 'name', 'ch', 'l1'],
+    depth: 6,
+    presets: [
+      { label: 'CM › PM › 제품라인 › 제품', slots: ['cm', 'owner', 'category', 'name', 'none', 'none'] },
+      { label: 'CM › PM › 제품라인 › 제품 › 채널', slots: ['cm', 'owner', 'category', 'name', 'ch', 'none'] },
+      { label: '브랜드 › 제품', slots: ['l1', 'name', 'none', 'none', 'none', 'none'] },
+      { label: '제품', slots: ['name', 'none', 'none', 'none', 'none', 'none'] },
+    ],
+  },
+  channel: {
+    axes: ['rep', 'ch', 'name', 'cm', 'l1'],
+    depth: 4,
+    presets: [
+      { label: '영업담당자 › 채널 › 제품', slots: ['rep', 'ch', 'name', 'none'] },
+      { label: '채널 › 제품', slots: ['ch', 'name', 'none', 'none'] },
+      { label: '영업담당자 › 채널 › CM › 제품', slots: ['rep', 'ch', 'cm', 'name'] },
+    ],
+  },
+};
 const MOBILE_PAGE = 60;
 
-type Sums = Pick<Group, 'mtd' | 'fcst' | 'prev'>;
-
-function Cells({ g, s, compare, detail }: { g: Sums; s: Scenario; compare: boolean; detail: boolean }) {
-  const m = metrics(g[s]);
-  const p = metrics(g.prev);
-  return (
-    <>
-      <td className="num grp-start font-semibold">{mil(m.sales)}</td>
-      {compare && detail && <td className="num text-muted">{mil(p.sales)}</td>}
-      {compare && <td className={`num ${tone(m.sales - p.sales)}`}>{p.sales > 0 ? pct(growth(m.sales, p.sales)) : '-'}</td>}
-      {detail && <td className="num grp-start">{mil(m.cogs)}</td>}
-      <td className={`num ${detail ? '' : 'grp-start'}`}>{mil(m.gp)}</td>
-      <td className={`num ${tone(m.gpm)}`}>{pct(m.gpm)}</td>
-      {compare && <td className={`num ${tone((m.gpm ?? 0) - (p.gpm ?? 0))}`}>{ppt(m.gpm, p.gpm)}</td>}
-      {detail && <td className="num grp-start">{mil(m.incentive)}</td>}
-      {detail && <td className="num">{mil(m.general)}</td>}
-      <td className={`num font-semibold ${detail ? '' : 'grp-start'} ${tone(m.op)}`}>{mil(m.op)}</td>
-      <td className={`num ${tone(m.opm)}`}>{pct(m.opm)}</td>
-      {compare && <td className={`num ${tone((m.opm ?? 0) - (p.opm ?? 0))}`}>{ppt(m.opm, p.opm)}</td>}
-    </>
-  );
+/** 한 묶음의 표시값 */
+interface Ctx {
+  m: Metrics;
+  p: Metrics;
+  t: [number, number, number] | null; // 목표 [매출, GP, OP]
+  price: number | null; // 제품 하나일 때 판가
+  prevPrice: number | null;
+  priceChg: number | null; // 제품 하나면 단가 증감, 여러 개면 동일제품 단가 변동률
+  single: boolean;
 }
 
-/** 모바일 카드 한 장: 이름 + 매출·GP·OP 세 줄 */
-function MobileCard({ g, s, compare }: { g: Sums; s: Scenario; compare: boolean }) {
-  const m = metrics(g[s]);
-  const p = metrics(g.prev);
-  return (
-    <dl className="m-metrics">
-      <div>
-        <dt>매출</dt>
-        <dd className="font-semibold">{mil(m.sales)}</dd>
-        {compare && <dd className={`m-delta ${tone(m.sales - p.sales)}`}>{p.sales > 0 ? pct(growth(m.sales, p.sales)) : '-'}</dd>}
-      </div>
-      <div>
-        <dt>GP</dt>
-        <dd>{mil(m.gp)} <small className={tone(m.gpm)}>{pct(m.gpm)}</small></dd>
-        {compare && <dd className={`m-delta ${tone((m.gpm ?? 0) - (p.gpm ?? 0))}`}>{ppt(m.gpm, p.gpm)}</dd>}
-      </div>
-      <div>
-        <dt>OP</dt>
-        <dd className={tone(m.op)}>{mil(m.op)} <small className={tone(m.opm)}>{pct(m.opm)}</small></dd>
-        {compare && <dd className={`m-delta ${tone((m.opm ?? 0) - (p.opm ?? 0))}`}>{ppt(m.opm, p.opm)}</dd>}
-      </div>
-    </dl>
-  );
+interface Col {
+  id: string;
+  group: string;
+  label: string;
+  title?: string;
+  detail?: boolean; // '전체 지표'에서만
+  compare?: boolean; // 전월 비교 (전월 실적 보기에서는 숨김)
+  target?: boolean; // 목표 (제품별 모드만)
+  cell: (c: Ctx) => { v: React.ReactNode; cls?: string };
 }
+
+const ach = (actual: number, target: number | undefined) => (target && target > 0 ? actual / target : null);
+const achCell = (actual: number, target: number | undefined) => {
+  const r = ach(actual, target);
+  return { v: pct(r), cls: r == null ? 'text-muted' : r >= 1 ? 'text-[var(--pos)]' : 'text-[var(--neg)]' };
+};
+const priceCols: Col[] = [
+  { id: 'price', group: '판가 (원/EA)', label: '판가', title: '총매출 ÷ 판매수량 (제품 단위)', cell: (c) => ({ v: c.price == null ? '-' : won(c.price) }) },
+  {
+    id: 'pchg',
+    group: '판가 (원/EA)',
+    label: '증감',
+    compare: true,
+    title: '제품: 전월 대비 단가 증감 · 묶음: 동일제품 단가 변동률(전월 수량 고정)',
+    cell: (c) => ({ v: pct(c.priceChg), cls: tone(c.priceChg) }),
+  },
+  { id: 'pprice', group: '판가 (원/EA)', label: '전월 판가', detail: true, compare: true, cell: (c) => ({ v: c.prevPrice == null ? '-' : won(c.prevPrice), cls: 'text-muted' }) },
+];
+
+const COLS: Record<PivotMode, Col[]> = {
+  product: [
+    { id: 'tsales', group: '매출', label: '목표', target: true, cell: (c) => ({ v: c.t ? mil(c.t[0]) : '-', cls: 'text-muted' }) },
+    { id: 'sales', group: '매출', label: '실적', cell: (c) => ({ v: mil(c.m.sales), cls: 'font-semibold' }) },
+    { id: 'asales', group: '매출', label: '목표비', target: true, cell: (c) => achCell(c.m.sales, c.t?.[0]) },
+    { id: 'growth', group: '매출', label: '전월비', compare: true, cell: (c) => ({ v: c.p.sales > 0 ? pct(growth(c.m.sales, c.p.sales)) : '-', cls: tone(c.m.sales - c.p.sales) }) },
+    { id: 'psales', group: '매출', label: '전월', detail: true, compare: true, cell: (c) => ({ v: mil(c.p.sales), cls: 'text-muted' }) },
+    { id: 'inc', group: '매출총이익 (GP)', label: '장려금', detail: true, cell: (c) => ({ v: mil(c.m.incentive) }) },
+    { id: 'net', group: '매출총이익 (GP)', label: '순매출', detail: true, cell: (c) => ({ v: mil(c.m.net) }) },
+    { id: 'cogs', group: '매출총이익 (GP)', label: '매출원가', detail: true, cell: (c) => ({ v: mil(c.m.cogs) }) },
+    { id: 'tgp', group: '매출총이익 (GP)', label: '목표', target: true, cell: (c) => ({ v: c.t ? mil(c.t[1]) : '-', cls: 'text-muted' }) },
+    { id: 'gp', group: '매출총이익 (GP)', label: '실적', cell: (c) => ({ v: mil(c.m.gp), cls: `font-semibold ${tone(c.m.gp)}` }) },
+    { id: 'agp', group: '매출총이익 (GP)', label: '목표비', target: true, cell: (c) => achCell(c.m.gp, c.t?.[1]) },
+    { id: 'gpm', group: '매출총이익 (GP)', label: 'GP율', cell: (c) => ({ v: pct(c.m.gpm), cls: tone(c.m.gpm) }) },
+    { id: 'gpd', group: '매출총이익 (GP)', label: '전월비', detail: true, compare: true, cell: (c) => ({ v: ppt(c.m.gpm, c.p.gpm), cls: tone((c.m.gpm ?? 0) - (c.p.gpm ?? 0)) }) },
+    { id: 'gen', group: '영업이익 (OP)', label: '일반비', detail: true, cell: (c) => ({ v: mil(c.m.general) }) },
+    { id: 'top', group: '영업이익 (OP)', label: '목표', target: true, cell: (c) => ({ v: c.t ? mil(c.t[2]) : '-', cls: 'text-muted' }) },
+    { id: 'op', group: '영업이익 (OP)', label: '실적', cell: (c) => ({ v: mil(c.m.op), cls: `font-semibold ${tone(c.m.op)}` }) },
+    { id: 'aop', group: '영업이익 (OP)', label: '목표비', target: true, cell: (c) => achCell(c.m.op, c.t?.[2]) },
+    { id: 'opm', group: '영업이익 (OP)', label: 'OP율', cell: (c) => ({ v: pct(c.m.opm), cls: tone(c.m.opm) }) },
+    { id: 'opd', group: '영업이익 (OP)', label: '전월비', detail: true, compare: true, cell: (c) => ({ v: ppt(c.m.opm, c.p.opm), cls: tone((c.m.opm ?? 0) - (c.p.opm ?? 0)) }) },
+    ...priceCols,
+  ],
+  // 채널별: 매출총이익(GP)까지만 (사용자 요청)
+  channel: [
+    { id: 'sales', group: '매출', label: '실적', cell: (c) => ({ v: mil(c.m.sales), cls: 'font-semibold' }) },
+    { id: 'growth', group: '매출', label: '전월비', compare: true, cell: (c) => ({ v: c.p.sales > 0 ? pct(growth(c.m.sales, c.p.sales)) : '-', cls: tone(c.m.sales - c.p.sales) }) },
+    { id: 'psales', group: '매출', label: '전월', detail: true, compare: true, cell: (c) => ({ v: mil(c.p.sales), cls: 'text-muted' }) },
+    { id: 'inc', group: '장려금 · 순매출', label: '장려금', cell: (c) => ({ v: mil(c.m.incentive) }) },
+    { id: 'net', group: '장려금 · 순매출', label: '순매출', cell: (c) => ({ v: mil(c.m.net) }) },
+    { id: 'cogs', group: '매출총이익 (GP)', label: '매출원가', detail: true, cell: (c) => ({ v: mil(c.m.cogs) }) },
+    { id: 'gp', group: '매출총이익 (GP)', label: '실적', cell: (c) => ({ v: mil(c.m.gp), cls: `font-semibold ${tone(c.m.gp)}` }) },
+    { id: 'gpm', group: '매출총이익 (GP)', label: 'GP율', cell: (c) => ({ v: pct(c.m.gpm), cls: tone(c.m.gpm) }) },
+    { id: 'gpd', group: '매출총이익 (GP)', label: '전월비', compare: true, cell: (c) => ({ v: ppt(c.m.gpm, c.p.gpm), cls: tone((c.m.gpm ?? 0) - (c.p.gpm ?? 0)) }) },
+    ...priceCols,
+  ],
+};
 
 /**
- * 손익 피벗. 1차~5차 축으로 단계별 드릴다운 (기본: CM › PM › 제품라인 › 품목).
- * 장려금·일반비는 품목 단위로 배부돼 있어 어느 축·단계로 묶어도 합계가 같다.
+ * 손익 피벗. 단계별 드릴다운 (제품별: CM › PM › 제품라인 › 제품 [› 채널], 채널별: 영업담당자 › 채널 › 제품).
+ * 장려금·일반비는 제품 × 채널 행에 배부돼 있어 어느 축·단계로 묶어도 합계가 같다.
  * PC는 들여쓰기 표, 모바일은 한 단계씩 들어가는 카드 목록으로 보여준다.
  */
 export default function PnlPivot({
+  mode,
   rows,
   curYm,
   prevYm,
+  progressRate,
+  targets,
   exportHref,
 }: {
+  mode: PivotMode;
   rows: MaterialRow[];
   curYm: string;
   prevYm: string;
+  /** 월 진행률 — 누계 보기의 목표 = 월 목표 × 진행률 */
+  progressRate: number;
+  targets?: { cur: TargetMap; prev: TargetMap };
   exportHref?: string;
 }) {
-  const [slots, setSlots] = useState<Slot[]>(PRESETS[0].slots);
+  const cfg = MODES[mode];
+  const [slots, setSlots] = useState<Slot[]>(cfg.presets[0].slots);
   const [scenario, setScenario] = useState<Scenario>('fcst');
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
@@ -116,20 +167,60 @@ export default function PnlPivot({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return rows;
-    return rows.filter((r) =>
-      [r.name, r.matnr, r.l1t, r.l2t, r.l3t, r.l4t, r.cm, r.category, r.owner].some((v) =>
-        v.toLowerCase().includes(q),
-      ),
-    );
+    return rows.filter((r) => [r.name, r.matnr, r.l1t, r.cm, r.category, r.owner, r.cht, r.rep].some((v) => v.toLowerCase().includes(q)));
   }, [rows, query]);
 
-  const total = useMemo(() => totalOf(filtered), [filtered]);
   const compare = scenario !== 'prev';
+  const cols = COLS[mode].filter((c) => (detail || !c.detail) && (compare || !c.compare) && (!c.target || targets));
+  const groups = cols.reduce<{ name: string; span: number }[]>((acc, c) => {
+    const last = acc.at(-1);
+    if (last?.name === c.group) last.span += 1;
+    else acc.push({ name: c.group, span: 1 });
+    return acc;
+  }, []);
+  const groupStart = new Set(cols.filter((c, i) => i === 0 || cols[i - 1].group !== c.group).map((c) => c.id));
+
+  const targetMap = scenario === 'prev' ? targets?.prev : targets?.cur;
+  const targetScale = scenario === 'mtd' ? progressRate : 1;
+  /** 묶음의 목표: 제품 목표 합. 채널로 이미 나뉜 묶음은 제품 목표를 채널로 나눌 수 없어 없음 */
+  const targetOf = (list: MaterialRow[], channelSplit: boolean): Ctx['t'] => {
+    if (!targetMap || channelSplit) return null;
+    const seen = new Set<string>();
+    const t: [number, number, number] = [0, 0, 0];
+    let any = false;
+    for (const r of list) {
+      if (seen.has(r.matnr)) continue;
+      seen.add(r.matnr);
+      const v = targetMap[r.matnr];
+      if (!v) continue;
+      any = true;
+      t[0] += v[0] * targetScale;
+      t[1] += v[1] * targetScale;
+      t[2] += v[2] * targetScale;
+    }
+    return any ? t : null;
+  };
+  const ctxOf = (g: Pick<Group, 'mtd' | 'fcst' | 'prev' | 'rows'>, channelSplit: boolean): Ctx => {
+    const single = g.rows.length > 0 && g.rows.every((r) => r.matnr === g.rows[0].matnr);
+    const price = single ? unitPrice(g[scenario]) : null;
+    const prevPrice = single ? unitPrice(g.prev) : null;
+    return {
+      m: metrics(g[scenario]),
+      p: metrics(g.prev),
+      t: targetOf(g.rows, channelSplit),
+      price,
+      prevPrice,
+      priceChg: single ? (price != null && prevPrice ? price / prevPrice - 1 : null) : priceChange(g.rows, scenario),
+      single,
+    };
+  };
+
+  const total = useMemo(() => ({ ...totalOf(filtered), rows: filtered }), [filtered]);
   const label = (s: Scenario) => `${monthLabel(s === 'prev' ? prevYm : curYm)} ${SCENARIO_LABEL[s].split(' ')[1]}`;
-  // CM은 CM1·CM2·CM3·(미매핑)·기타 순, 나머지는 매출 큰 순
-  const sorted = (list: MaterialRow[], axis: Axis) =>
-    groupBy(list, axis).sort((a, b) => (axis === 'cm' ? cmRank(a.label) - cmRank(b.label) : 0) || b[scenario].sales - a[scenario].sales);
-  const presetIndex = PRESETS.findIndex((p) => p.slots.every((s, i) => s === slots[i]));
+  const sorted = (list: MaterialRow[], axis: Axis) => sortGroups(groupBy(list, axis), axis, (g) => g[scenario].sales);
+  const presetIndex = cfg.presets.findIndex((p) => p.slots.every((s, i) => s === slots[i]));
+  /** depth 단계까지 채널로 나뉘었는가 (목표는 제품 단위라 채널 아래에서는 없음) */
+  const splitAt = (depth: number) => path.slice(0, depth + 1).includes('ch');
 
   const resetDrill = () => {
     setOpen(new Set());
@@ -165,7 +256,7 @@ export default function PnlPivot({
       const next = [...prev];
       next[i] = v;
       // 같은 축이 두 번 나오지 않게 뒤 단계에서 지운다
-      for (let j = i + 1; j < DEPTH; j++) if (next[j] !== 'none' && next.slice(0, j).includes(next[j])) next[j] = 'none';
+      for (let j = i + 1; j < cfg.depth; j++) if (next[j] !== 'none' && next.slice(0, j).includes(next[j])) next[j] = 'none';
       // '없음' 뒤는 모두 없음
       const cut = next.indexOf('none');
       return cut < 0 ? next : next.map((s, j) => (j > cut ? 'none' : s));
@@ -173,10 +264,26 @@ export default function PnlPivot({
     resetDrill();
   };
 
-  const nameCell = (axis: Axis, g: Group) => {
-    const showCode = CODED.includes(axis) && !g.key.includes(':') && g.key !== '-';
-    return { showCode, title: `${PIVOT_LABEL[axis]}: ${g.label}${showCode ? ` (${g.key})` : ''}` };
-  };
+  const cells = (c: Ctx) => (
+    <>
+      {cols.map((col) => {
+        const { v, cls } = col.cell(c);
+        return (
+          <td key={col.id} className={`num ${groupStart.has(col.id) ? 'grp-start' : ''} ${cls ?? ''}`}>
+            {v}
+          </td>
+        );
+      })}
+    </>
+  );
+
+  /** 이름 칸: 제품은 풀네임(최대 2줄) + MATNR */
+  const nameText = (axis: Axis, g: Group) => (
+    <span className="pivot-name-text">
+      <span className="pivot-label">{g.label}</span>
+      {axis === 'name' && <span className="pivot-code">{g.key}</span>}
+    </span>
+  );
 
   const renderLevel = (list: MaterialRow[], depth: number, prefix: string): React.ReactNode =>
     sorted(list, path[depth]).map((g) => {
@@ -184,24 +291,27 @@ export default function PnlPivot({
       const axis = path[depth];
       const expandable = depth < path.length - 1;
       const isOpen = expandable && open.has(k);
-      const { showCode, title } = nameCell(axis, g);
       return (
         <Fragment key={k}>
           <tr className={`${expandable ? 'cursor-pointer' : ''} ${depth === 0 && expandable ? 'subtotal' : ''}`}>
-            <td className={`pivot-name ${depth > 0 ? 'text-[12.5px]' : ''}`} style={{ paddingLeft: 8 + depth * 14 }} title={title}>
-              <span className="pivot-name-inner">
-                {expandable ? (
-                  <button type="button" onClick={() => toggle(k)} aria-expanded={isOpen} className="pivot-toggle">
-                    <span className="pivot-caret" aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
-                    <span className="truncate">{g.label}</span>
-                  </button>
-                ) : (
-                  <span className="truncate">{g.label}</span>
-                )}
-                {showCode && <span className="pivot-code">{g.key}</span>}
-              </span>
+            <td
+              className={`pivot-name ${depth > 0 ? 'text-[12.5px]' : ''}`}
+              style={{ paddingLeft: 8 + depth * 14 }}
+              title={`${PIVOT_LABEL[axis] ?? axis}: ${g.label}${axis === 'name' ? ` (${g.key})` : ''}`}
+            >
+              {expandable ? (
+                <button type="button" onClick={() => toggle(k)} aria-expanded={isOpen} className="pivot-toggle">
+                  <span className="pivot-caret" aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
+                  {nameText(axis, g)}
+                </button>
+              ) : (
+                <span className="pivot-toggle">
+                  <span className="pivot-caret" aria-hidden="true" />
+                  {nameText(axis, g)}
+                </span>
+              )}
             </td>
-            <Cells g={g} s={scenario} compare={compare} detail={detail} />
+            {cells(ctxOf(g, splitAt(depth)))}
           </tr>
           {isOpen && renderLevel(g.rows, depth + 1, k)}
         </Fragment>
@@ -215,24 +325,62 @@ export default function PnlPivot({
     [filtered, trail, path],
   );
   const mobileGroups = path.length ? sorted(mobileRows, path[mobileLevel]) : [];
-  const mobileTotal = useMemo(() => totalOf(mobileRows), [mobileRows]);
+  const mobileTotal = useMemo(() => ({ ...totalOf(mobileRows), rows: mobileRows }), [mobileRows]);
   const canDrill = mobileLevel < path.length - 1;
 
-  const scenarioButtons = (
-    <div className="pivot-scenario" role="group" aria-label="기간">
-      {(['mtd', 'fcst', 'prev'] as Scenario[]).map((s) => (
-        <button key={s} type="button" aria-pressed={scenario === s} onClick={() => setScenario(s)}>
-          {label(s)}
-        </button>
-      ))}
-    </div>
-  );
+  /** 모바일 카드 지표: 매출 · GP · OP(채널별은 순매출) + 판가 줄 */
+  const mobileMetrics = (c: Ctx) => {
+    const salesSub = c.t ? `목표비 ${pct(ach(c.m.sales, c.t[0]))}` : compare && c.p.sales > 0 ? pct(growth(c.m.sales, c.p.sales)) : '';
+    const salesTone = c.t ? tone((ach(c.m.sales, c.t[0]) ?? 1) - 1) : tone(c.m.sales - c.p.sales);
+    return (
+      <>
+        <dl className="m-metrics">
+          <div>
+            <dt>매출</dt>
+            <dd className="font-semibold">{mil(c.m.sales)}</dd>
+            {salesSub && <dd className={`m-delta ${salesTone}`}>{salesSub}</dd>}
+          </div>
+          {mode === 'channel' ? (
+            <div>
+              <dt>순매출</dt>
+              <dd>{mil(c.m.net)}</dd>
+              <dd className="m-delta text-muted">장려금 {mil(c.m.incentive)}</dd>
+            </div>
+          ) : null}
+          <div>
+            <dt>GP</dt>
+            <dd className={tone(c.m.gp)}>{mil(c.m.gp)} <small className={tone(c.m.gpm)}>{pct(c.m.gpm)}</small></dd>
+            {c.t ? <dd className="m-delta text-muted">목표비 {pct(ach(c.m.gp, c.t[1]))}</dd> : compare && <dd className={`m-delta ${tone((c.m.gpm ?? 0) - (c.p.gpm ?? 0))}`}>{ppt(c.m.gpm, c.p.gpm)}</dd>}
+          </div>
+          {mode === 'product' && (
+            <div>
+              <dt>OP</dt>
+              <dd className={tone(c.m.op)}>{mil(c.m.op)} <small className={tone(c.m.opm)}>{pct(c.m.opm)}</small></dd>
+              {c.t ? <dd className="m-delta text-muted">목표비 {pct(ach(c.m.op, c.t[2]))}</dd> : compare && <dd className={`m-delta ${tone((c.m.opm ?? 0) - (c.p.opm ?? 0))}`}>{ppt(c.m.opm, c.p.opm)}</dd>}
+            </div>
+          )}
+        </dl>
+        {(c.price != null || c.priceChg != null) && (
+          <p className="m-price">
+            판가 {c.price != null ? `${won(c.price)}원` : '(묶음)'}
+            {compare && c.priceChg != null && <span className={tone(c.priceChg)}> {c.single ? '전월비' : '동일제품'} {pct(c.priceChg)}</span>}
+          </p>
+        )}
+      </>
+    );
+  };
 
   return (
     <div className="card pivot-card">
       <div className="pivot-controls">
         <div className="pivot-row">
-          {scenarioButtons}
+          <div className="pivot-scenario" role="group" aria-label="기간">
+            {(['mtd', 'fcst', 'prev'] as Scenario[]).map((s) => (
+              <button key={s} type="button" aria-pressed={scenario === s} onClick={() => setScenario(s)}>
+                {label(s)}
+              </button>
+            ))}
+          </div>
           <label className="pivot-field">
             <span>분석 순서</span>
             <select
@@ -240,13 +388,13 @@ export default function PnlPivot({
               onChange={(e) => {
                 const i = Number(e.target.value);
                 if (i >= 0) {
-                  setSlots(PRESETS[i].slots);
+                  setSlots(cfg.presets[i].slots);
                   resetDrill();
                 }
               }}
             >
               {presetIndex < 0 && <option value={-1}>직접 선택</option>}
-              {PRESETS.map((p, i) => (
+              {cfg.presets.map((p, i) => (
                 <option key={p.label} value={i}>{p.label}</option>
               ))}
             </select>
@@ -257,7 +405,7 @@ export default function PnlPivot({
               setQuery(e.target.value);
               resetDrill();
             }}
-            placeholder="CM·PM·품목·제품 검색"
+            placeholder={mode === 'product' ? 'CM·PM·제품명·제품코드 검색' : '영업담당자·채널·제품 검색'}
             aria-label="손익 검색"
             className="pivot-search"
           />
@@ -266,7 +414,7 @@ export default function PnlPivot({
             <button type="button" aria-pressed={detail} onClick={() => setDetail(true)}>전체 지표</button>
           </div>
           {exportHref && (
-            <a href={exportHref} download className="pivot-export only-pc" title="제품별 손익 원천 (당월 누계·예상·전월, 올해 월별)">
+            <a href={exportHref} download className="pivot-export only-pc" title="제품 × 채널 손익 원천 (당월 누계·예상·전월, 올해 월별)">
               원천 다운로드
             </a>
           )}
@@ -277,7 +425,7 @@ export default function PnlPivot({
               <span>계층{i + 1}</span>
               <select value={s} disabled={i > 0 && slots[i - 1] === 'none'} onChange={(e) => setSlot(i, e.target.value as Slot)}>
                 {i > 0 && <option value="none">없음</option>}
-                {AXES.filter((a) => a === s || !slots.slice(0, i).includes(a)).map((a) => (
+                {cfg.axes.filter((a) => a === s || !slots.slice(0, i).includes(a)).map((a) => (
                   <option key={a} value={a}>{PIVOT_LABEL[a]}</option>
                 ))}
               </select>
@@ -295,39 +443,32 @@ export default function PnlPivot({
               </button>
             </div>
           )}
-          <span className="ml-auto text-xs text-muted">단위: 백만원 · 전월비 매출 %, 이익 %p</span>
+          <span className="ml-auto text-xs text-muted">
+            단위: 백만원 · 판가 원 · 이익률 순매출 대비{targets ? ' · 목표비 = 실적 ÷ 목표' : ''}{scenario === 'mtd' && targets ? ' (누계는 목표 × 진행률)' : ''}
+          </span>
         </div>
       </div>
 
       {/* PC: 들여쓰기 피벗 표 */}
       <div className="data-scroll only-pc">
-        <table className="dtable pivot-dtable">
+        <table className={`dtable pivot-dtable pivot-${mode}`}>
           <thead>
             <tr className="pivot-group-row">
               <th rowSpan={2} className="pivot-name text-left">{path.map((a) => PIVOT_LABEL[a]).join(' › ')}</th>
-              <th colSpan={1 + (compare ? 1 : 0) + (compare && detail ? 1 : 0)} className="grp-start">매출</th>
-              <th colSpan={2 + (compare ? 1 : 0) + (detail ? 1 : 0)} className="grp-start">매출이익 (GP)</th>
-              <th colSpan={2 + (compare ? 1 : 0) + (detail ? 2 : 0)} className="grp-start">영업이익 (OP)</th>
+              {groups.map((g, i) => (
+                <th key={`${g.name}-${i}`} colSpan={g.span} className="grp-start">{g.name}</th>
+              ))}
             </tr>
             <tr>
-              <th className="num grp-start">실적</th>
-              {compare && detail && <th className="num">전월</th>}
-              {compare && <th className="num">전월비</th>}
-              {detail && <th className="num grp-start">매출원가</th>}
-              <th className={`num ${detail ? '' : 'grp-start'}`}>GP</th>
-              <th className="num">GP율</th>
-              {compare && <th className="num">전월비</th>}
-              {detail && <th className="num grp-start">장려금</th>}
-              {detail && <th className="num">일반비</th>}
-              <th className={`num ${detail ? '' : 'grp-start'}`}>OP</th>
-              <th className="num">OP율</th>
-              {compare && <th className="num">전월비</th>}
+              {cols.map((c) => (
+                <th key={c.id} className={`num ${groupStart.has(c.id) ? 'grp-start' : ''}`} title={c.title}>{c.label}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
             <tr className="total">
               <td className="pivot-name">합계</td>
-              <Cells g={total} s={scenario} compare={compare} detail={detail} />
+              {cells(ctxOf(total, false))}
             </tr>
             {path.length > 0 && renderLevel(filtered, 0, '')}
           </tbody>
@@ -352,19 +493,19 @@ export default function PnlPivot({
             <b>{trail.length ? trail[trail.length - 1].label : '합계'}</b>
             <span>{path.length ? `${PIVOT_LABEL[path[mobileLevel]]} ${mobileGroups.length}개` : ''}</span>
           </div>
-          <MobileCard g={mobileTotal} s={scenario} compare={compare} />
+          {mobileMetrics(ctxOf(mobileTotal, splitAt(mobileLevel - 1)))}
         </div>
         <ul className="m-list">
           {mobileGroups.slice(0, mobileLimit).map((g) => {
-            const { showCode } = nameCell(path[mobileLevel], g);
+            const axis = path[mobileLevel];
             const body = (
               <>
                 <div className="m-card-head">
-                  <b>{g.label}</b>
-                  {showCode && <span className="pivot-code">{g.key}</span>}
+                  <b className="m-name">{g.label}</b>
                   {canDrill && <span className="m-chevron" aria-hidden="true">›</span>}
                 </div>
-                <MobileCard g={g} s={scenario} compare={compare} />
+                {axis === 'name' && <p className="m-sub">{g.key}</p>}
+                {mobileMetrics(ctxOf(g, splitAt(mobileLevel)))}
               </>
             );
             return (
@@ -393,7 +534,7 @@ export default function PnlPivot({
             {Math.min(MOBILE_PAGE, mobileGroups.length - mobileLimit)}개 더 보기 (남은 {mobileGroups.length - mobileLimit}개)
           </button>
         )}
-        <p className="m-foot">단위: 백만원 · 전월비 매출 %, GP·OP는 이익률 %p</p>
+        <p className="m-foot">단위: 백만원 · 이익률 순매출 대비{targets ? ' · 목표비 = 실적 ÷ 목표' : ''}</p>
       </div>
     </div>
   );

@@ -1,6 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
+import { cmRank } from '@/lib/pnl';
 import {
   CartesianGrid,
   Line,
@@ -21,6 +23,7 @@ import {
   BASE_OF,
   inScope,
   isRateMetric,
+  LEVEL_LABEL,
   LEVELS,
   migration,
   pareto,
@@ -70,9 +73,9 @@ const AXIS_TICK = { fontSize: 11, fill: 'var(--viz-axis)' };
 
 const PRESETS: { label: string; x: SegMetric; xc: CutMethod; y: SegMetric; yc: CutMethod }[] = [
   { label: '순매출 × 영업이익', x: 'net', xc: 'manual', y: 'op', yc: 'zero' },
-  { label: '순매출 × 매출이익률', x: 'net', xc: 'manual', y: 'gpm', yc: 'mean' },
+  { label: '순매출 × GP율', x: 'net', xc: 'manual', y: 'gpm', yc: 'mean' },
   { label: '순매출 × 성장률', x: 'net', xc: 'manual', y: 'growth', yc: 'mean' },
-  { label: '수량 × 매출이익', x: 'qty', xc: 'pareto', y: 'gp', yc: 'zero' },
+  { label: '수량 × 매출총이익', x: 'qty', xc: 'pareto', y: 'gp', yc: 'zero' },
 ];
 
 const qtyFmt = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 0 });
@@ -277,8 +280,22 @@ function CutControl({
   );
 }
 
-export default function SegmentView({ products, periods }: { products: SegProduct[]; periods: SegmentPeriodMeta[] }) {
+export default function SegmentView({
+  products,
+  periods,
+  channels,
+  channel,
+}: {
+  products: SegProduct[];
+  periods: SegmentPeriodMeta[];
+  /** 채널(고객그룹3) 필터 — 바꾸면 서버에서 그 채널 금액만 다시 모은다 */
+  channels: { code: string; name: string }[];
+  channel: string | null;
+}) {
+  const router = useRouter();
+  const [chPending, startCh] = useTransition();
   const [period, setPeriod] = useState<SegPeriod>('ytd');
+  const [productQ, setProductQ] = useState('');
   const [path, setPath] = useState<string[]>([]);
   const [byChild, setByChild] = useState(false);
   const [xm, setXm] = useState<SegMetric>('net');
@@ -301,7 +318,7 @@ export default function SegmentView({ products, periods }: { products: SegProduc
   const periodLabel = (id: SegPeriod) => periods.find((p) => p.id === id)?.label ?? id;
   const childLevel = path.length < LEVELS.length ? LEVELS[path.length] : null;
   const unit = byChild && childLevel ? childLevel : 'product';
-  const unitName = unit === 'product' ? '제품' : `LV${LEVELS.indexOf(unit) + 1}`;
+  const unitName = unit === 'product' ? '제품' : LEVEL_LABEL[unit];
 
   const resetFilters = () => {
     setFocusQ(null);
@@ -317,16 +334,23 @@ export default function SegmentView({ products, periods }: { products: SegProduc
         if (i > path.length) return [];
         const m = new Map<string, { label: string; sales: number }>();
         for (const p of inScope(products, path.slice(0, i))) {
-          const v = m.get(p[lv]) ?? { label: p[`${lv}t`], sales: 0 };
+          const v = m.get(p[lv]) ?? { label: p[lv], sales: 0 };
           v.sales += p.a[pi][0];
           m.set(p[lv], v);
         }
-        return [...m].sort((a, b) => b[1].sales - a[1].sales);
+        // CM은 CM1 → CM2 → CM3 → (미매핑) → 기타 순, PM은 매출 큰 순
+        return [...m].sort((a, b) => (lv === 'cm' ? cmRank(a[0]) - cmRank(b[0]) : 0) || b[1].sales - a[1].sales);
       }),
     [products, path, pi],
   );
 
-  const units = useMemo(() => toUnits(inScope(products, path), unit), [products, path, unit]);
+  // 제품 필터: 제품명·제품코드에 검색어가 들어간 제품만 범위에 남긴다
+  const scoped = useMemo(() => {
+    const q = productQ.trim().toLowerCase();
+    const list = inScope(products, path);
+    return q ? list.filter((p) => p.name.toLowerCase().includes(q) || p.matnr.toLowerCase().includes(q)) : list;
+  }, [products, path, productQ]);
+  const units = useMemo(() => toUnits(scoped, unit), [scoped, unit]);
   const seg = useMemo(() => segment(units, period, xm, ym, xc, yc), [units, period, xm, ym, xc, yc]);
   // 등급 변동은 위 분석 기간과 별개로 두 달을 고른다 (기본 전월 실적 → 당월 예상)
   const cmpFrom = BASE_OF[cmp] as SegPeriod;
@@ -482,10 +506,10 @@ export default function SegmentView({ products, periods }: { products: SegProduc
               </button>
             ))}
           </div>
-          <div className="seg-levels" aria-label="제품계층 선택">
+          <div className="seg-levels" aria-label="범위 선택">
             {LEVELS.map((lv, i) => (
               <label key={lv} className={i > path.length ? 'is-disabled' : ''}>
-                <span>LV{i + 1}</span>
+                <span>{LEVEL_LABEL[lv]}</span>
                 <select value={path[i] ?? ''} disabled={i > path.length} onChange={(e) => setLevel(i, e.target.value)}>
                   <option value="">{i > path.length ? '—' : '전체'}</option>
                   {levelOptions[i].map(([k, v]) => (
@@ -497,8 +521,39 @@ export default function SegmentView({ products, periods }: { products: SegProduc
                 {i < LEVELS.length - 1 && <i aria-hidden="true">›</i>}
               </label>
             ))}
-            {path.length > 0 && (
-              <button type="button" className="seg-link" onClick={() => setLevel(0, '')}>
+            <label>
+              <span>제품</span>
+              <input
+                className="seg-product-q"
+                value={productQ}
+                onChange={(e) => {
+                  setProductQ(e.target.value);
+                  resetFilters();
+                }}
+                placeholder="제품명·코드"
+                aria-label="제품 필터"
+              />
+            </label>
+            <label>
+              <span>채널</span>
+              <select
+                value={channel ?? ''}
+                disabled={chPending}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  resetFilters();
+                  startCh(() => router.push(v ? `/segment?ch=${encodeURIComponent(v)}` : '/segment', { scroll: false }));
+                }}
+                aria-label="채널 필터"
+              >
+                <option value="">전체</option>
+                {channels.map((c) => (
+                  <option key={c.code} value={c.code}>{c.name}</option>
+                ))}
+              </select>
+            </label>
+            {(path.length > 0 || productQ) && (
+              <button type="button" className="seg-link" onClick={() => { setProductQ(''); setLevel(0, ''); }}>
                 초기화
               </button>
             )}
@@ -508,7 +563,7 @@ export default function SegmentView({ products, periods }: { products: SegProduc
               제품
             </button>
             <button type="button" aria-pressed={unit !== 'product'} disabled={!childLevel} onClick={() => { setByChild(true); resetFilters(); }}>
-              하위 계층{childLevel ? ` (LV${LEVELS.indexOf(childLevel) + 1})` : ''}
+              하위 묶음{childLevel ? ` (${LEVEL_LABEL[childLevel]})` : ''}
             </button>
           </div>
         </div>
@@ -530,7 +585,7 @@ export default function SegmentView({ products, periods }: { products: SegProduc
         </div>
         {(usesOp && meta.costNote) || (seg && seg.excluded > 0) ? (
           <p className="seg-note">
-            {usesOp && meta.costNote && <span>{meta.costNote} — 미입력 계층은 순매출이 총매출과, 영업이익이 매출이익과 같습니다.</span>}
+            {usesOp && meta.costNote && <span>{meta.costNote} — 미입력 채널은 순매출이 총매출과, 영업이익이 매출총이익과 같습니다.</span>}
             {seg && seg.excluded > 0 && <span>{xLabel}·{yLabel} 값이 없는 {unitName} {seg.excluded}개 제외 (매출 0인 이익률, 비교 기간 매출 0인 성장률 등)</span>}
           </p>
         ) : null}

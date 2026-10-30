@@ -72,11 +72,10 @@ export interface ProductMap {
   etc: string;
   category: string;
   owner: string;
-  /** 제품라인별 CM 이름 (line_owner 탭). 있으면 CM 축에 CM1~CM3 표시 대신 이 이름을 쓴다 */
-  cmName?: string;
 }
 
-/** 제품라인(카테고리)별 CM·PM 담당자 이름 — 대시보드 '제품 매핑'에서 수정 */
+/** 제품라인(카테고리)별 CM·PM 담당자 이름 — 대시보드 '제품 매핑'에서 수정.
+ *  line이 '[CM1]'처럼 대괄호로 싸인 행은 CM 표시별 기본 이름 (제품라인이 비었거나 제품라인 이름이 없을 때) */
 export interface LineOwner {
   line: string;
   cm: string;
@@ -85,56 +84,76 @@ export interface LineOwner {
   updatedBy: string;
 }
 
-/** 장려금·일반비 수기 입력 (제품계층 LV1, 월 전체 금액, 원) */
-export interface ManualInput {
+/** 고객그룹3(채널)별 영업담당자 — 채널당 한 명, 대시보드 '제품 매핑'에서 수정 */
+export interface ChannelOwner {
+  ch: string;
+  cht: string;
+  rep: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+/** 장려금·일반비 수기 입력: 고객그룹3(채널) × 월 전체 금액(원). 그 채널 제품 총매출 비중으로 배부 */
+export interface ChannelInput {
   ym: string;
-  l1: string;
-  l1t: string;
+  ch: string; // KVGR3
+  cht: string; // KVGR3_T
   incentive: number;
   general: number;
   updatedAt: string;
   updatedBy: string;
 }
 
-/** 장려금 고객그룹3(채널) 수기 입력 (월 전체 금액, 원). 입력한 달은 LV1 입력의 장려금 대신 쓴다 */
-export interface ChannelInput {
-  ym: string;
-  ch: string; // KVGR3
-  cht: string; // KVGR3_T
-  incentive: number;
-  updatedAt: string;
-  updatedBy: string;
-}
-
-/** 한 달의 제품 × 고객그룹3 매출 (채널 장려금을 제품에 나누는 비중) */
-export interface ChannelSale {
+/** 제품 × 고객그룹3 한 달 실적 (CO-PA) */
+export interface ChannelFact {
   matnr: string;
   ch: string;
+  cht: string;
   sales: number;
+  qty: number;
+  cogs: number; // CO-PA 실제원가 (마감월에만 의미)
 }
 
-/** 품목 행의 분석 축 */
+/** 제품 × 월 목표 (구글 시트 target_product, 원) */
+export interface Target {
+  ym: string;
+  matnr: string;
+  sales: number;
+  gp: number;
+  op: number;
+}
+
+/** 손익 행의 분석 축: 제품 × 고객그룹3 한 행 */
 export interface RowDims extends Hierarchy {
   matnr: string;
   name: string;
-  /** 시트 CM1~CM3·기타 중 표시한 열 이름 */
+  /** CM 축: 시트 CM 표시 (CM1·CM2·CM3·기타·(미매핑)·(CM 중복)) */
   cm: string;
+  /** cm과 같은 값 — 정렬 함수가 묶음 순서를 정할 때 쓴다 */
+  cmMark: string;
   category: string;
   owner: string;
+  ch: string;
+  cht: string;
+  /** 채널 영업담당자 */
+  rep: string;
 }
 
-/** 한 달치 품목 손익 행 (마감월 실적 또는 당월 예상) */
+/** 한 달치 손익 행 (마감월 실적 또는 당월 예상) */
 export interface MonthRow extends RowDims {
   amt: Amounts;
 }
 
-/** 화면에서 쓰는 품목 행 (분석 축 + 시나리오별 금액) */
+/** 화면에서 쓰는 손익 행 (분석 축 + 시나리오별 금액) */
 export interface MaterialRow extends RowDims {
   costMethod: CostMethod;
   mtd: Amounts;
   fcst: Amounts;
   prev: Amounts;
 }
+
+/** 제품별 목표 [매출, GP, OP] */
+export type TargetMap = Record<string, [number, number, number]>;
 
 export interface DashboardData {
   curYm: string;
@@ -144,6 +163,9 @@ export interface DashboardData {
   progress: { elapsed: number; daysInMonth: number; rate: number };
   rows: MaterialRow[];
   coverage: { unitSales: number; rateSales: number; noneSales: number };
-  inputStatus: { l1Total: number; curFilled: number; prevFilled: number; curChannel: boolean; prevChannel: boolean };
+  /** 비용 입력 현황: 매출 있는 채널 수, 당월·전월 입력한 채널 수 */
+  inputStatus: { chTotal: number; curFilled: number; prevFilled: number };
+  /** 당월·전월 제품 목표 */
+  targets: { cur: TargetMap; prev: TargetMap };
   storage: 'sheets' | 'local';
 }

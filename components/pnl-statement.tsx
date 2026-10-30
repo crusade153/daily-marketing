@@ -5,15 +5,17 @@ import type { Amounts, DashboardData } from '@/lib/types';
 
 type Line = { label: string; get: (m: Metrics) => number | null; rate?: boolean; strong?: boolean; cost?: boolean };
 
+// 순매출 = 총매출 − 장려금, 매출총이익 = 순매출 − 매출원가, 영업이익 = 매출총이익 − 일반비. 이익률은 순매출 대비
 const LINES: Line[] = [
-  { label: '매출', get: (m) => m.sales, strong: true },
-  { label: '매출원가', get: (m) => m.cogs, cost: true },
-  { label: '매출이익', get: (m) => m.gp, strong: true },
-  { label: '매출이익률', get: (m) => m.gpm, rate: true },
+  { label: '총매출', get: (m) => m.sales, strong: true },
   { label: '장려금', get: (m) => m.incentive, cost: true },
+  { label: '순매출', get: (m) => m.net, strong: true },
+  { label: '매출원가', get: (m) => m.cogs, cost: true },
+  { label: '매출총이익', get: (m) => m.gp, strong: true },
+  { label: 'GP율', get: (m) => m.gpm, rate: true },
   { label: '일반비', get: (m) => m.general, cost: true },
   { label: '영업이익', get: (m) => m.op, strong: true },
-  { label: '영업이익률', get: (m) => m.opm, rate: true },
+  { label: 'OP율', get: (m) => m.opm, rate: true },
 ];
 
 /** 손익계산서 형태: 당월 누계 | 당월 예상 | 전월 실적 | 예상−전월 (단위: 백만원) */
@@ -71,7 +73,7 @@ export default function PnlStatement({
         </tbody>
       </table>
       </div>
-      <div className="panel-footer"><span>{inputStatus.curFilled < inputStatus.l1Total ? `장려금·일반비 ${inputStatus.curFilled}/${inputStatus.l1Total}개 계층 반영` : '장려금·일반비 입력 완료'}</span><span>전월 대비: 월 전체 기준</span></div>
+      <div className="panel-footer"><span>{inputStatus.curFilled < inputStatus.chTotal ? `장려금·일반비 ${inputStatus.curFilled}/${inputStatus.chTotal}개 채널 반영` : '장려금·일반비 입력 완료'}</span><span>전월 대비: 월 전체 기준</span></div>
     </section>
   );
 }

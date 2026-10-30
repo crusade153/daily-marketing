@@ -1,10 +1,10 @@
 // 세그먼트(ABCD 매트릭스)·파레토 순수 계산.
-//   점 = 제품 또는 선택한 계층의 하위 계층. X·Y 지표와 기준선을 바꿔 가며 A~D를 나눈다.
+//   점 = 제품 또는 선택한 범위의 하위 묶음(CM › PM). X·Y 지표와 기준선을 바꿔 가며 A~D를 나눈다.
 //   A = X↑·Y↑, B = X↓·Y↑, C = X↑·Y↓, D = X↓·Y↓  (기준선 이상이면 ↑)
-//   기준선은 선택 범위 안의 점들로 다시 계산한다 → 계층을 좁히면 같은 제품도 등급이 바뀔 수 있다.
+//   기준선은 선택 범위 안의 점들로 다시 계산한다 → 범위를 좁히면 같은 제품도 등급이 바뀔 수 있다.
 //   파레토: 양(+)의 값만 큰 순으로 누적. 누적 80%까지 '핵심', 95%까지 '중요', 나머지 '일반', 0 이하는 '손실·없음'.
 import { metrics } from './pnl.ts';
-import type { Amounts, Hierarchy } from './types';
+import type { Amounts } from './types';
 
 /** 분석 기간. prev2는 전월 실적의 비교 기준으로만 쓴다 */
 export const SEG_PERIODS = ['ytd', 'fcst', 'prev', 'prev2'] as const;
@@ -12,22 +12,30 @@ export type SegPeriod = (typeof SEG_PERIODS)[number];
 /** 성장률·세그먼트 이동의 비교 기준 기간 */
 export const BASE_OF: Partial<Record<SegPeriod, SegPeriod>> = { fcst: 'prev', prev: 'prev2' };
 
-/** 제품 1개의 기간별 금액. a[i] = [매출, 수량(EA), 매출원가, 장려금+일반비], i는 SEG_PERIODS 순서 */
-export interface SegProduct extends Hierarchy {
+/** [매출, 수량(EA), 매출원가, 장려금, 일반비] */
+export type SegAmounts = [number, number, number, number, number];
+
+/** 제품 1개의 기간별 금액. a[i]는 SEG_PERIODS 순서 */
+export interface SegProduct {
   matnr: string;
   name: string;
-  a: [number, number, number, number][];
+  cm: string;
+  cmMark: string;
+  owner: string;
+  category: string;
+  l1t: string;
+  a: SegAmounts[];
 }
 
-/** net = 순매출 = 총매출 − 판관비(입력한 장려금·일반비). 미입력이면 총매출과 같다 */
+/** net = 순매출 = 총매출 − 장려금 (2026-10-30 사용자 정의). 미입력이면 총매출과 같다 */
 export type SegMetric = 'net' | 'sales' | 'qty' | 'gp' | 'op' | 'gpm' | 'opm' | 'growth';
 export const SEG_METRIC_LABEL: Record<SegMetric, string> = {
   net: '순매출',
   sales: '총매출',
   qty: '판매수량',
-  gp: '매출이익',
+  gp: '매출총이익',
   op: '영업이익',
-  gpm: '매출이익률',
+  gpm: 'GP율',
   opm: '영업이익률',
   growth: '총매출 성장률',
 };
@@ -43,8 +51,10 @@ export interface Cut {
 export type Quadrant = 'A' | 'B' | 'C' | 'D';
 export const QUADRANTS: Quadrant[] = ['A', 'B', 'C', 'D'];
 
-export type Level = 'l1' | 'l2' | 'l3' | 'l4';
-export const LEVELS: Level[] = ['l1', 'l2', 'l3', 'l4'];
+/** 범위 선택 단계: CM › PM (제품은 검색, 채널은 서버 필터) */
+export type Level = 'cm' | 'owner';
+export const LEVELS: Level[] = ['cm', 'owner'];
+export const LEVEL_LABEL: Record<Level, string> = { cm: 'CM', owner: 'PM' };
 
 /** 매트릭스에 찍는 점 (제품 또는 계층 묶음) */
 export interface SegUnit {
@@ -55,15 +65,7 @@ export interface SegUnit {
   amt: Amounts[]; // SEG_PERIODS 순서
 }
 
-export const toAmounts = ([sales, qty, cogs, cost]: [number, number, number, number]): Amounts => ({
-  sales,
-  qty,
-  cogs,
-  incentive: cost,
-  general: 0,
-});
-
-const labelOf = (p: SegProduct, lv: Level) => p[`${lv}t` as const];
+export const toAmounts = ([sales, qty, cogs, incentive, general]: SegAmounts): Amounts => ({ sales, qty, cogs, incentive, general });
 
 /** 선택한 계층 경로(앞에서부터 코드)에 속하는 제품 */
 export function inScope(products: SegProduct[], path: string[]): SegProduct[] {
@@ -80,7 +82,7 @@ export function toUnits(products: SegProduct[], unit: Level | 'product'): SegUni
     const key = p[unit];
     let u = map.get(key);
     if (!u) {
-      u = { key, label: labelOf(p, unit), code: key, count: 0, amt: p.a.map(() => ({ sales: 0, qty: 0, cogs: 0, incentive: 0, general: 0 })) };
+      u = { key, label: p[unit], code: '', count: 0, amt: p.a.map(() => ({ sales: 0, qty: 0, cogs: 0, incentive: 0, general: 0 })) };
       map.set(key, u);
     }
     u.count += 1;
@@ -90,6 +92,7 @@ export function toUnits(products: SegProduct[], unit: Level | 'product'): SegUni
       t.qty += v[1];
       t.cogs += v[2];
       t.incentive += v[3];
+      t.general += v[4];
     });
   }
   return [...map.values()];
@@ -99,7 +102,7 @@ export function toUnits(products: SegProduct[], unit: Level | 'product'): SegUni
 export function unitValue(u: SegUnit, period: SegPeriod, metric: SegMetric): number | null {
   const i = SEG_PERIODS.indexOf(period);
   const m = metrics(u.amt[i]);
-  if (metric === 'net') return m.sales - m.incentive - m.general;
+  if (metric === 'net') return m.net;
   if (metric !== 'growth') return m[metric];
   const base = BASE_OF[period];
   if (!base) return null;
@@ -123,7 +126,7 @@ function weightedRate(units: SegUnit[], period: SegPeriod, metric: SegMetric): n
       den += b;
     } else {
       num += metric === 'gpm' ? m.gp : m.op;
-      den += m.sales;
+      den += m.net;
     }
   }
   if (den <= 0) return null;

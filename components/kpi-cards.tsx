@@ -49,13 +49,12 @@ export default function KpiCards({
   const p = metrics(total.prev);
   const cur = monthLabel(curYm);
   const prv = monthLabel(prevYm);
-  const missing = inputStatus.curFilled === 0 && !inputStatus.curChannel;
-  const prevMissing = inputStatus.prevFilled === 0 && !inputStatus.prevChannel;
+  const missing = inputStatus.curFilled === 0;
   return (
     <section className="kpi-grid" aria-label="주요 경영지표">
       <Card
         emphasis
-        title={`${cur} 예상 매출`}
+        title={`${cur} 예상 총매출`}
         main={eok(f.sales)}
         sub={<span className={tone(f.sales - p.sales)}>전월 대비 {signedEok(f.sales - p.sales)}</span>}
         rows={[
@@ -64,27 +63,27 @@ export default function KpiCards({
         ]}
       />
       <Card
-        title={`${cur} 예상 매출이익`}
+        title={`${cur} 예상 순매출`}
+        main={eok(f.net)}
+        sub={<span className="text-muted">{missing ? '장려금 입력 대기 · 총매출과 같음' : `총매출 − 장려금 ${eok(f.incentive)}`}</span>}
+        rows={[
+          [`${cur} 누계`, eok(m.net)],
+          [`${prv} 실적`, eok(p.net)],
+        ]}
+      />
+      <Card
+        title={`${cur} 예상 매출총이익`}
         main={eok(f.gp)}
-        sub={<span>매출이익률 {pct(f.gpm)} <span className={tone((f.gpm ?? 0) - (p.gpm ?? 0))}>({ppt(f.gpm, p.gpm)})</span></span>}
+        sub={<span>GP율 {pct(f.gpm)} <span className={tone((f.gpm ?? 0) - (p.gpm ?? 0))}>({ppt(f.gpm, p.gpm)})</span></span>}
         rows={[
           [`${cur} 누계`, eok(m.gp)],
           [`${prv} 실적`, eok(p.gp)],
         ]}
       />
       <Card
-        title={`${cur} 예상 장려금 + 일반비`}
-        main={missing ? '입력 대기' : eok(f.incentive + f.general)}
-        sub={<span className="text-muted">{missing ? '장려금·일반비 입력 후 반영' : `매출 대비 ${pct(f.sales ? (f.incentive + f.general) / f.sales : null)}`}</span>}
-        rows={[
-          ['장려금 / 일반비', missing ? '미입력' : `${eok(f.incentive)} / ${eok(f.general)}`],
-          [`${prv} 실적`, prevMissing ? '미입력' : eok(p.incentive + p.general)],
-        ]}
-      />
-      <Card
         title={`${cur} 예상 영업이익`}
         main={eok(f.op)}
-        sub={<span>{missing ? '장려금·일반비 미반영' : inputStatus.curFilled < inputStatus.l1Total ? `일부 비용 미반영 · 이익률 ${pct(f.opm)}` : <>영업이익률 {pct(f.opm)} <span className={tone((f.opm ?? 0) - (p.opm ?? 0))}>({ppt(f.opm, p.opm)})</span></>}</span>}
+        sub={<span>{missing ? '장려금·일반비 미반영' : inputStatus.curFilled < inputStatus.chTotal ? `일부 채널 비용 미반영 · OP율 ${pct(f.opm)}` : <>OP율 {pct(f.opm)} <span className={tone((f.opm ?? 0) - (p.opm ?? 0))}>({ppt(f.opm, p.opm)})</span></>}</span>}
         rows={[
           [`${cur} 누계`, eok(m.op)],
           [`${prv} 실적`, eok(p.op)],

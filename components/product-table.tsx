@@ -8,7 +8,7 @@ import { SCENARIO_LABEL, type MaterialRow, type Scenario } from '@/lib/types';
 
 const PAGE = 200;
 const KEY_COLS = new Set(['matnr', 'name', 'cm', 'owner', 'l1', 'qty', 'price', 'sales', 'gp', 'gpm', 'growth', 'pprice', 'pchg']);
-const TEXT_COLS = ['matnr', 'name', 'cm', 'owner', 'category', 'l1', 'l2', 'l3', 'l4'];
+const TEXT_COLS = ['matnr', 'name', 'cm', 'owner', 'category', 'l1'];
 const MOBILE_SORTS = [
   { id: 'sales', label: '매출순' },
   { id: 'gp', label: 'GP순' },
@@ -44,27 +44,25 @@ const COLS: Col[] = [
   { id: 'cm', label: 'CM', sort: (r) => r.cm, cell: (r) => r.cm },
   { id: 'owner', label: 'PM', sort: (r) => r.owner, cell: (r) => r.owner },
   { id: 'category', label: '제품라인', sort: (r) => r.category, cell: (r) => r.category },
-  { id: 'l3', label: '품목(LV3)', sort: (r) => r.l3t, cell: (r) => r.l3t },
   { id: 'l1', label: '브랜드', sort: (r) => r.l1t, cell: (r) => r.l1t },
-  { id: 'l2', label: 'LV2', sort: (r) => r.l2t, cell: (r) => r.l2t },
-  { id: 'l4', label: 'LV4', sort: (r) => r.l4t, cell: (r) => r.l4t },
   { id: 'qty', label: '수량(EA)', num: true, sort: (_, c) => c.m.qty, cell: (_, c) => qtyFmt.format(c.m.qty) },
   {
     id: 'price',
     label: '판매단가(원)',
-    title: '매출 ÷ 판매수량(EA)',
+    title: '총매출 ÷ 판매수량(EA)',
     num: true,
     sort: (_, c) => c.price,
     cell: (_, c) => (c.price == null ? '-' : won(c.price)),
   },
-  { id: 'sales', label: '매출', num: true, sort: (_, c) => c.m.sales, cell: (_, c) => mil(c.m.sales), className: () => 'font-semibold' },
-  { id: 'cogs', label: '매출원가', num: true, sort: (_, c) => c.m.cogs, cell: (_, c) => mil(c.m.cogs) },
-  { id: 'gp', label: '매출이익', num: true, sort: (_, c) => c.m.gp, cell: (_, c) => mil(c.m.gp) },
-  { id: 'gpm', label: '이익률', num: true, sort: (_, c) => c.m.gpm, cell: (_, c) => pct(c.m.gpm), className: (_, c) => tone(c.m.gpm) },
+  { id: 'sales', label: '총매출', num: true, sort: (_, c) => c.m.sales, cell: (_, c) => mil(c.m.sales), className: () => 'font-semibold' },
   { id: 'inc', label: '장려금', num: true, sort: (_, c) => c.m.incentive, cell: (_, c) => mil(c.m.incentive) },
+  { id: 'net', label: '순매출', num: true, sort: (_, c) => c.m.net, cell: (_, c) => mil(c.m.net) },
+  { id: 'cogs', label: '매출원가', num: true, sort: (_, c) => c.m.cogs, cell: (_, c) => mil(c.m.cogs) },
+  { id: 'gp', label: '매출총이익', num: true, sort: (_, c) => c.m.gp, cell: (_, c) => mil(c.m.gp) },
+  { id: 'gpm', label: 'GP율', num: true, sort: (_, c) => c.m.gpm, cell: (_, c) => pct(c.m.gpm), className: (_, c) => tone(c.m.gpm) },
   { id: 'gen', label: '일반비', num: true, sort: (_, c) => c.m.general, cell: (_, c) => mil(c.m.general) },
   { id: 'op', label: '영업이익', num: true, sort: (_, c) => c.m.op, cell: (_, c) => mil(c.m.op), className: (_, c) => `font-semibold ${tone(c.m.op)}` },
-  { id: 'opm', label: '영업이익률', num: true, sort: (_, c) => c.m.opm, cell: (_, c) => pct(c.m.opm), className: (_, c) => tone(c.m.opm) },
+  { id: 'opm', label: 'OP율', num: true, sort: (_, c) => c.m.opm, cell: (_, c) => pct(c.m.opm), className: (_, c) => tone(c.m.opm) },
   {
     id: 'psales',
     label: '전월 매출',
@@ -129,7 +127,7 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
     const col = COLS.find((c) => c.id === sort.id) ?? COLS.find((c) => c.id === 'sales')!;
     const withCtx = rows
       .filter((r) => !l1 || r.l1 === l1)
-      .filter((r) => !q || [r.matnr, r.name, r.l2t, r.l3t, r.l4t, r.cm, r.owner, r.category].some((v) => v.toLowerCase().includes(q)))
+      .filter((r) => !q || [r.matnr, r.name, r.l1t, r.cm, r.owner, r.category].some((v) => v.toLowerCase().includes(q)))
       .map((r) => {
         const ctx: Ctx = { m: metrics(r[scenario]), p: metrics(r.prev), price: unitPrice(r[scenario]), prevPrice: unitPrice(r.prev) };
         return { r, ctx, key: col.sort(r, ctx) };
@@ -164,7 +162,7 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
   const label = (s: Scenario) => `${monthLabel(s === 'prev' ? prevYm : curYm)} ${SCENARIO_LABEL[s].split(' ')[1]}`;
   const totals: Record<string, string> = {
     matnr: '합계', name: l1 ? l1s.find(([k]) => k === l1)?.[1].label ?? '' : '전체 제품',
-    sales: mil(total.sales), cogs: mil(total.cogs), gp: mil(total.gp), gpm: pct(total.gpm),
+    sales: mil(total.sales), net: mil(total.net), cogs: mil(total.cogs), gp: mil(total.gp), gpm: pct(total.gpm),
     inc: mil(total.incentive), gen: mil(total.general), op: mil(total.op), opm: pct(total.opm),
   };
 

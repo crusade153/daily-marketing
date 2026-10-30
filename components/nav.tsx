@@ -5,13 +5,14 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import RefreshButton from './refresh-button';
 
+// ABCD 등급관리는 경영 요약 바로 옆 (사용자 요청: 그만큼 중요). 일별 매출은 2026-10-30 삭제
 const LINKS = [
   { href: '/', label: '경영 요약' },
-  { href: '/hierarchy', label: '손익 분석' },
-  { href: '/trend', label: '월별 추이' },
   { href: '/segment', label: 'ABCD 등급관리' },
-  { href: '/daily', label: '일별 매출' },
-  { href: '/input', label: '장려금·일반비 입력' },
+  { href: '/hierarchy', label: '제품별 손익 분석' },
+  { href: '/channels', label: '채널별 손익 분석' },
+  { href: '/trend', label: '월별 추이' },
+  { href: '/input', label: '비용·목표 입력' },
   { href: '/mapping', label: '제품 매핑' },
 ];
 
