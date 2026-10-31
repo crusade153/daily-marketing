@@ -28,7 +28,7 @@ export default function Nav({ user }: { user: { name: string; role: string } | n
   }
   if (path === '/login' || path === '/signup') return null;
   const isActive = (href: string) => (href === '/' ? path === '/' : path.startsWith(href));
-  const links = user?.role === 'ADMIN' ? [...LINKS, { href: '/admin/users', label: '회원관리' }] : LINKS;
+  const links = user?.role === 'ADMIN' ? [...LINKS, { href: '/admin/pnl', label: 'SAP 손익' }, { href: '/admin/insights', label: '손익 인사이트' }, { href: '/admin/users', label: '회원관리' }] : LINKS;
   const current = links.find((l) => isActive(l.href));
   return (
     <header className="app-header">

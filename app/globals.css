@@ -564,3 +564,155 @@ table.dtable tbody tr:hover td {
   .ua-table td.ua-actions::before { display: none; }
   .ua-actions button { margin: 0 6px 0 0; padding: 8px 14px; font-size: 13px; }
 }
+/* 손익 인사이트 (/admin/insights, 관리자 시범) */
+.il-page { display: flex; flex-direction: column; gap: 14px; }
+.il-beta { margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: 0; vertical-align: 4px; }
+.il-stack { display: flex; flex-direction: column; gap: 14px; }
+.il-empty { padding: 16px; font-size: 12px; color: var(--muted); }
+.il-hero { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; overflow: hidden; border-radius: 12px; background: #2c4263; box-shadow: 0 10px 30px #1b2d4626; }
+.il-hero-card { padding: 18px 20px 16px; background: linear-gradient(160deg, #1b2d46 0%, #20385a 100%); color: #fff; opacity: 0; transform: translateY(16px); transition: opacity .5s cubic-bezier(.16,1,.3,1), transform .5s cubic-bezier(.16,1,.3,1); }
+.il-hero-card.on { opacity: 1; transform: none; }
+.il-hero-title { font-size: 12px; font-weight: 600; color: #a9bad3; }
+.il-hero-value { margin-top: 6px; font-size: clamp(24px, 2.3vw, 34px); font-weight: 750; letter-spacing: -1px; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.il-hero-value.up { color: #7cc4ff; }
+.il-hero-value.down { color: #ff9b94; }
+.il-hero-sub { margin-top: 6px; font-size: 11.5px; color: #c4d1e3; line-height: 1.5; }
+.il-hero-delta { color: #fff; font-variant-numeric: tabular-nums; }
+.il-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; }
+.il-tool { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.il-tool > span { font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.il-tool .segmented { overflow-x: auto; max-width: 100%; }
+.il-asof { margin-left: auto; font-size: 11px; color: var(--muted); }
+.il-panel { min-width: 0; overflow: hidden; }
+.il-heading { flex-wrap: wrap; align-items: flex-start; }
+.il-heading > div { flex: 1 1 360px; min-width: 0; }
+.il-heading p { line-height: 1.6; }
+.il-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.il-tools .segmented { overflow-x: auto; max-width: 100%; }
+.il-foot { flex-wrap: wrap; line-height: 1.6; }
+.il-side-title, .il-detail-sub { margin: 14px 0 6px; font-size: 11px; font-weight: 700; color: var(--muted); }
+/* ① 브리지 */
+.il-bridge { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(260px, 1fr); gap: 18px; padding: 4px 18px 16px; }
+.il-wf { display: flex; flex-direction: column; gap: 6px; }
+.il-wf-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) 72px; align-items: center; gap: 12px; padding: 4px 8px; border-radius: 6px; text-align: left; font-size: 12px; border: 1px solid transparent; }
+button.il-wf-row:hover { background: var(--surface-2); }
+.il-wf-row.is-selected { background: var(--accent-soft); border-color: #c9daf3; }
+.il-wf-row.is-total { font-weight: 700; }
+.il-wf-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.il-wf-track { position: relative; height: 22px; }
+.il-wf-zero { position: absolute; top: -4px; bottom: -4px; border-left: 1px solid #9baac0; }
+.il-wf-bar { position: absolute; top: 3px; height: 16px; border-radius: 3px; transform: scaleX(0); transition: transform .42s cubic-bezier(.16,1,.3,1); }
+.il-wf-bar.on { transform: scaleX(1); }
+.il-wf-link { position: absolute; top: 19px; height: 21px; border-left: 1px dashed #b8c3d3; }
+.il-wf-value { font-weight: 700; }
+.il-detail { min-width: 0; padding: 14px 16px; border-radius: 10px; background: var(--surface-2); align-self: start; }
+.il-detail-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 14px; font-weight: 750; }
+.il-detail-head > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.il-detail-head b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.il-detail-head em { flex-shrink: 0; padding: 1px 8px; border: 1px solid; border-radius: 999px; font-size: 11px; font-style: normal; font-weight: 700; }
+.il-detail-hint { margin-top: 4px; font-size: 11.5px; color: var(--muted); line-height: 1.55; }
+.il-contrib { display: flex; flex-direction: column; gap: 5px; }
+.il-contrib li { display: grid; grid-template-columns: minmax(0, 1fr) 90px 62px; align-items: center; gap: 8px; font-size: 12px; }
+.il-contrib-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.il-contrib-track { position: relative; height: 8px; border-radius: 2px; background: #e6eaf0; }
+.il-contrib-track::before { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; border-left: 1px solid #9baac0; }
+.il-contrib-track > span { position: absolute; top: 0; height: 100%; border-radius: 2px; }
+/* ② 고래곡선 */
+.il-whale { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(260px, 1fr); gap: 18px; padding: 4px 18px 16px; }
+.il-whale-chart, .il-momentum-chart { min-width: 0; }
+.il-tick { font-size: 11px; fill: var(--viz-axis); font-variant-numeric: tabular-nums; }
+.il-axis-title { font-weight: 600; }
+.il-curve { fill: none; stroke: var(--viz-1); stroke-width: 2.5; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset 1.2s cubic-bezier(.16,1,.3,1); }
+.il-curve.on { stroke-dashoffset: 0; }
+.il-area, .il-tail, .il-late, .il-peak-line { opacity: 0; transition: opacity .4s ease .9s; }
+.il-area.on, .il-late.on { opacity: 1; }
+.il-tail { fill: var(--viz-down); }
+.il-tail.on { opacity: .06; }
+.il-peak-line { stroke: var(--viz-down); stroke-dasharray: 4 4; stroke-width: 1; }
+.il-peak-line.on { opacity: .7; }
+.il-ann { font-size: 11.5px; fill: var(--text); font-weight: 600; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.il-ann-strong { font-weight: 750; fill: var(--accent); }
+.il-ann-neg { fill: var(--neg); }
+.il-pulse { fill: none; stroke: var(--viz-1); stroke-width: 2; transform-box: fill-box; transform-origin: center; animation: il-pulse 1.8s cubic-bezier(.16,1,.3,1) 1.2s 3 both; }
+@keyframes il-pulse { from { transform: scale(1); opacity: .8; } to { transform: scale(3.4); opacity: 0; } }
+.il-tip { position: absolute; transform: translateX(-50%); padding: 6px 10px; border-radius: 6px; background: var(--text); color: #fff; font-size: 11px; line-height: 1.5; white-space: nowrap; pointer-events: none; box-shadow: 0 6px 18px #1b2d4633; }
+.il-tip b { display: block; font-size: 13px; font-variant-numeric: tabular-nums; }
+.il-whale-side { min-width: 0; }
+.il-insight { padding: 12px 14px; border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--accent-soft); font-size: 12.5px; line-height: 1.75; }
+/* ③ 성장 품질 맵 */
+.il-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 0 18px 8px; font-size: 12px; }
+.il-legend span { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.il-legend i { width: 10px; height: 10px; border-radius: 50%; }
+.il-legend small { font-weight: 400; color: var(--muted); }
+.il-momentum { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(260px, 1fr); gap: 18px; padding: 4px 18px 16px; }
+.il-mpt { cursor: pointer; outline: none; }
+.il-mpt:focus-visible circle:last-of-type { stroke: var(--accent); stroke-width: 3; }
+.il-mlabel { font-size: 11px; font-weight: 600; fill: var(--text); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; opacity: 0; transition: opacity .3s ease; pointer-events: none; }
+.il-mlabel.on { opacity: 1; }
+.il-mpt.is-selected .il-mlabel { font-weight: 750; }
+.il-replay { position: absolute; right: 4px; top: 0; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 11px; color: var(--muted); }
+.il-replay:hover { background: var(--surface-2); color: var(--text); }
+.il-mdetail dl { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; font-size: 12px; }
+.il-mdetail dl > div { display: flex; justify-content: space-between; gap: 10px; }
+.il-mdetail dt { color: var(--muted); }
+@media (max-width: 1100px) {
+  .il-bridge, .il-whale, .il-momentum { grid-template-columns: minmax(0, 1fr); }
+}
+/* 실적 손익계산서 (/admin/pnl, SAP 원천) */
+.lp-source { background: var(--accent-soft); border-color: #cfdcf2; color: var(--text); }
+.lp-source .notice-label { border-color: #cfdcf2; }
+.lp-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; }
+.lp-legend span { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.lp-legend i { width: 10px; height: 10px; border-radius: 2px; }
+.lp-chart { min-width: 0; padding: 0 18px 8px; }
+.lp-stack { transform: scaleY(0); transition: transform .5s cubic-bezier(.16,1,.3,1); }
+.lp-stack.on { transform: scaleY(1); }
+.lp-col.is-hover rect:not([fill=transparent]) { filter: brightness(.94); }
+.lp-op { font-size: 11.5px; font-weight: 750; font-variant-numeric: tabular-nums; opacity: 0; transition: opacity .3s ease; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+.lp-op.on { opacity: 1; }
+.lp-op.neg { fill: var(--neg); }
+.lp-op.pos { fill: var(--pos); }
+.lp-kind { font-size: 10px; font-weight: 700; fill: var(--accent); }
+.lp-100 { stroke: var(--text); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.lp-tip { transform: translateX(-50%); white-space: normal; width: 220px; }
+.lp-tip span { display: block; margin-top: 2px; color: #c4d1e3; }
+.lp-tip .lp-tip-neg { color: #ff9b94; }
+.lp-scroll { overflow-x: auto; padding: 0 8px 8px; }
+.lp-table { min-width: 860px; font-size: 12px; }
+.lp-table th, .lp-table td { padding: 7px 9px; white-space: nowrap; }
+.lp-table thead th small { display: block; font-size: 10px; font-weight: 700; color: var(--accent); }
+.lp-table tbody th { position: sticky; left: 0; z-index: 1; background: var(--surface); text-align: left; font-weight: 500; border-bottom: 1px solid var(--border); min-width: 180px; }
+.lp-table thead th:first-child { position: sticky; left: 0; z-index: 2; text-align: left; }
+.lp-table .lp-est { background: #fbfcfe; color: var(--muted); }
+.lp-table thead th.lp-est { background: #eef2f8; }
+.lp-table .lp-total { background: var(--accent-soft); font-weight: 700; }
+.lp-key th, .lp-key td { font-weight: 750; background: #f8fafc; }
+.lp-key th { background: #f8fafc; }
+.lp-key td.lp-total { background: #e3ecfa; }
+.lp-rate th, .lp-rate td { font-size: 11px; color: var(--muted); }
+.lp-rate th .lp-label { padding-left: 16px; }
+.lp-table tr.lp-d1 > th { padding-left: 26px; color: var(--muted); }
+.lp-table tr.lp-d2 > th { padding-left: 48px; color: var(--muted); font-size: 11.5px; }
+.lp-d1 td, .lp-d2 td { color: var(--muted); }
+.lp-toggle { display: inline-flex; align-items: center; gap: 6px; font-weight: inherit; color: inherit; text-align: left; }
+.lp-toggle span { width: 10px; font-size: 10px; color: var(--accent); }
+.lp-teams { min-width: 620px; font-size: 12px; }
+.lp-team { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lp-spark { display: block; }
+.lp-share { display: flex; align-items: center; gap: 8px; min-width: 140px; }
+.lp-share > span { height: 8px; border-radius: 2px; background: var(--viz-1); opacity: .8; }
+.lp-share em { font-style: normal; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.lp-more { color: var(--accent); font-weight: 700; }
+@media (max-width: 760px) {
+  .lp-chart { padding: 0 8px 8px; }
+  .lp-table tbody th { min-width: 130px; }
+}
+@media (max-width: 760px) {
+  .il-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .il-hero-card { padding: 14px; }
+  .il-asof { margin-left: 0; }
+  .il-tool { flex-direction: column; align-items: flex-start; width: 100%; }
+  .il-bridge, .il-whale, .il-momentum { padding: 4px 12px 14px; }
+  .il-wf-row { grid-template-columns: 92px minmax(0, 1fr) 62px; gap: 8px; padding: 4px; }
+  .il-legend { padding: 0 12px 8px; }
+}

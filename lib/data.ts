@@ -1,8 +1,10 @@
 import 'server-only';
 import { unstable_cache } from 'next/cache';
 import { runQuery } from './bigquery';
-import { getPeriods, monthLabel, progressOf, yearStartOf, ymRange, type Periods } from './period';
+import { getPeriods, monthLabel, progressOf, shiftYm, yearStartOf, ymRange, type Periods } from './period';
 import { applyLineOwners, buildMonthRows, buildRows, ORPHAN_NAME, type Axis } from './pnl';
+import { MOMENTUM_AXES, momentum, opBridge, whaleCurve, type InsightData, type InsightPair } from './insight';
+import { buildLedger, type GlRow, type Ledger, type LedgerMonth } from './ledger';
 import { buildPriceTrend, type PriceItem, type PriceTrend } from './price';
 import { getStore, storageKind, TABS, type Cell } from './sheets';
 import { SEG_PERIODS, type SegAmounts, type SegPeriod, type SegProduct } from './segment';
@@ -29,6 +31,7 @@ import type {
 const COPA = '`harimfood-361004.harim_sap_bi.CO_PA`';
 const MARA = '`harimfood-361004.harim_sap_bi.SD_MARA`';
 const KNVV = '`harimfood-361004.harim_sap_bi.SD_KNVV`';
+const ACDOCA = '`harimfood-361004.harim_sap_bi.FI_ACDOCA`';
 const COPA_FILTER = "c.VRGAR = 'F' AND c.PLIKZ = '0' AND c.BUKRS = '1000'";
 
 const num = (v: unknown) => (typeof v === 'number' ? v : Number(v ?? 0) || 0);
@@ -650,6 +653,154 @@ export async function getSegment(channel?: string | null, today?: string): Promi
     ],
     channels: [...chSales].sort((a, b) => b[1].sales - a[1].sales).map(([code, c]) => ({ code, name: c.name })),
     channel: channel ?? null,
+    dataDate: d.dataDate,
+  };
+}
+
+// ── 손익 인사이트 (관리자 시범) ────────────────────────────────
+
+/** 비교 기간 선택지 수 (최근 월부터) */
+const INSIGHT_PAIRS = 3;
+
+/** 영업이익 브리지·성장 품질은 이웃한 두 달씩, 고래곡선은 당월 예상·전월 실적·올해 누계 */
+export async function getInsights(today?: string): Promise<InsightData> {
+  const { d, blocks } = await getMonthBlocks(today);
+  // 1월에는 마감월이 없으므로 대시보드의 전월 실적을 앞에 붙인다
+  const seq: MonthBlock[] =
+    blocks.length >= 2
+      ? blocks
+      : [{ ym: d.prevYm, kind: 'actual', rows: toMonthRows(d.rows, 'prev'), filled: d.inputStatus.prevFilled, chTotal: d.inputStatus.chTotal }, ...blocks];
+  const n = seq.length;
+  const label = (b: MonthBlock) => `${monthLabel(b.ym)} ${b.kind === 'fcst' ? '예상' : '실적'}`;
+
+  const pairs: InsightPair[] = [];
+  for (let i = n - 1; i >= 1 && pairs.length < INSIGHT_PAIRS; i--) {
+    const b0 = seq[i - 1];
+    const b1 = seq[i];
+    pairs.push({
+      id: `${b0.ym}-${b1.ym}`,
+      baseLabel: label(b0),
+      curLabel: label(b1),
+      fcst: b1.kind === 'fcst',
+      coverage: [b0, b1].filter((b) => b.filled < b.chTotal).map((b) => `${monthLabel(b.ym)} ${b.filled}/${b.chTotal}개 채널`),
+      bridge: opBridge(b0.rows, b1.rows),
+      momentum: Object.fromEntries(
+        MOMENTUM_AXES.map((a) => [a, { net: momentum(b0.rows, b1.rows, a), pre: momentum(b0.rows, b1.rows, a, true) }]),
+      ) as InsightPair['momentum'],
+    });
+  }
+
+  const last = seq[n - 1];
+  const whale = (id: string, text: string, rows: MonthRow[]) => ({ id, label: text, gp: whaleCurve(rows, 'gp'), op: whaleCurve(rows, 'op') });
+  return {
+    pairs,
+    whales: [
+      whale('cur', label(last), last.rows),
+      whale('prev', label(seq[n - 2]), seq[n - 2].rows),
+      whale('ytd', `올해 누계 (${monthLabel(blocks[0].ym)}~${monthLabel(last.ym)})`, blocks.flatMap((b) => b.rows)),
+    ],
+    opReady: last.filled > 0,
+    dataDate: d.dataDate,
+  };
+}
+
+// ── SAP 실적 손익계산서 (회계원장, 관리자 시범) ───────────────────
+
+/** 전월 결산이 끝나기 전(매월 15일 이전)에는 전월을 잠정으로 본다 */
+const CLOSE_DAY = 15;
+
+/**
+ * 추정 기준 = 최근 마감 3개월. 전월이 잠정이면 그 전 3개월.
+ * 원장 조회는 올해 1월과 추정 기준 첫 달 중 이른 달부터.
+ */
+function ledgerBasis(p: Periods): { provisional: boolean; basis: string[]; start: string } {
+  const provisional = Number(p.today.slice(6, 8)) < CLOSE_DAY;
+  const last = shiftYm(p.curYm, provisional ? -2 : -1);
+  const basis = [shiftYm(last, -2), shiftYm(last, -1), last];
+  const y = yearStartOf(p.curYm);
+  return { provisional, basis, start: basis[0] < y ? basis[0] : y };
+}
+
+/** 캐시 항목 한도(2MB) 때문에 [월, 계정, 코스트센터, 금액] 순번 배열로 줄인다 */
+interface GlRaw {
+  months: string[];
+  accts: [string, string][]; // [계정, 최근 계정명]
+  ccs: [string, string][]; // [코스트센터, 최근 이름]
+  rows: [number, number, number, number][];
+}
+
+async function queryLedger(p: Periods): Promise<GlRaw> {
+  const { start } = ledgerBasis(p);
+  const rows = await runQuery<Record<string, unknown>>(
+    `
+    WITH b AS (
+      SELECT BUDAT, RACCT, TXT50, RCNTR, LTEXT_C, HSL
+      FROM ${ACDOCA}
+      WHERE RBUKRS = '1000' AND (STARTS_WITH(RACCT, '41') OR STARTS_WITH(RACCT, '61')) AND BUDAT BETWEEN @start AND @today
+    ),
+    g AS (
+      SELECT SUBSTR(BUDAT, 1, 6) AS ym, RACCT, IFNULL(RCNTR, '') AS cc, ROUND(SUM(HSL)) AS amt
+      FROM b GROUP BY 1, 2, 3 HAVING amt != 0
+    ),
+    a AS (SELECT RACCT, ARRAY_AGG(TXT50 ORDER BY BUDAT DESC LIMIT 1)[OFFSET(0)] AS txt FROM b GROUP BY 1),
+    c AS (SELECT RCNTR, ARRAY_AGG(LTEXT_C ORDER BY BUDAT DESC LIMIT 1)[OFFSET(0)] AS nm FROM b WHERE RCNTR IS NOT NULL GROUP BY 1)
+    SELECT g.ym, g.RACCT AS acct, g.cc, g.amt, a.txt, c.nm
+    FROM g LEFT JOIN a USING (RACCT) LEFT JOIN c ON c.RCNTR = g.cc
+    `,
+    { start: `${start}01`, today: p.today },
+  );
+  const raw: GlRaw = { months: [], accts: [], ccs: [], rows: [] };
+  const mi = new Map<string, number>();
+  const ai = new Map<string, number>();
+  const ci = new Map<string, number>();
+  const at = <T>(m: Map<string, number>, list: T[], key: string, make: () => T) => {
+    let i = m.get(key);
+    if (i == null) {
+      i = list.push(make()) - 1;
+      m.set(key, i);
+    }
+    return i;
+  };
+  for (const r of rows) {
+    const acct = str(r.acct);
+    const cc = str(r.cc);
+    raw.rows.push([
+      at(mi, raw.months, str(r.ym), () => str(r.ym)),
+      at(ai, raw.accts, acct, () => [acct, str(r.txt)]),
+      at(ci, raw.ccs, cc, () => [cc, str(r.nm)]),
+      num(r.amt),
+    ]);
+  }
+  return raw;
+}
+
+const cachedLedger = unstable_cache(async (today: string) => queryLedger(getPeriods(today)), ['gl-ledger-v1'], {
+  revalidate: 3600,
+  tags: ['bq'],
+});
+
+export type LedgerData = Ledger & { dataDate: string | null };
+
+/** 올해 1월 ~ 당월. 총매출·매출원가는 월별 추이와 같은 원천(마감월 CO-PA 실적, 당월은 월말 예상) */
+export async function getLedger(today?: string): Promise<LedgerData> {
+  const p = getPeriods(today);
+  const { provisional, basis } = ledgerBasis(p);
+  const [{ d, blocks }, raw] = await Promise.all([getMonthBlocks(today), cachedLedger(p.today)]);
+  const months: LedgerMonth[] = blocks.map((b) => ({
+    ym: b.ym,
+    kind: b.kind === 'fcst' ? 'estimate' : b.ym === p.prevYm && provisional ? 'provisional' : 'closed',
+  }));
+  const total = (b: MonthBlock, k: 'sales' | 'cogs') => b.rows.reduce((s, r) => s + r.amt[k], 0);
+  const gl: GlRow[] = raw.rows.map(([m, a, c, amt]) => ({
+    ym: raw.months[m],
+    acct: raw.accts[a][0],
+    acctName: raw.accts[a][1],
+    cc: raw.ccs[c][0],
+    ccName: raw.ccs[c][1],
+    amt,
+  }));
+  return {
+    ...buildLedger({ months, sales: blocks.map((b) => total(b, 'sales')), cogs: blocks.map((b) => total(b, 'cogs')), gl, basisYms: basis }),
     dataDate: d.dataDate,
   };
 }
