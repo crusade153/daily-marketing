@@ -2,6 +2,7 @@
 
 import { updateTag } from 'next/cache';
 import { z } from 'zod';
+import { getSession } from '@/lib/session';
 import { getStore, TABS, type Cell, type SheetRow } from '@/lib/sheets';
 
 const Amount = z.number().finite().min(-1e13).max(1e13);
@@ -37,6 +38,9 @@ async function upsert(tab: AnyTab, rows: Cell[][], key: (v: Cell[]) => string, w
   return { ok: true, updated: updates.length - (writeHeader ? 1 : 0), appended: appends.length };
 }
 
+// 서버 액션은 어느 경로(공개된 /login 포함)로도 호출될 수 있어 proxy만으로는 막히지 않는다. 액션마다 세션을 다시 확인한다
+const NO_SESSION: SaveResult = { ok: false, error: '로그인이 필요합니다. 다시 로그인하세요.' };
+
 const fail = (name: string, e: unknown): SaveResult => {
   console.error(name, e);
   return { ok: false, error: `저장 실패: ${(e as Error).message}` };
@@ -55,6 +59,7 @@ const ChannelSaveInput = z.object({
 
 /** 장려금·일반비 고객그룹3 입력 저장. (YYYYMM, 고객그룹3) 기준 upsert. 열 순서는 TABS.channelInput (고정비·변동비율이 끝) */
 export async function saveChannelInputs(input: unknown): Promise<SaveResult> {
+  if (!(await getSession())) return NO_SESSION;
   const parsed = ChannelSaveInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: '입력값 형식이 올바르지 않습니다.' };
   const { ym, user, entries } = parsed.data;
@@ -78,6 +83,7 @@ const ChannelOwnerInput = z.object({
 
 /** 고객그룹3별 영업담당자 저장. 고객그룹3 기준 upsert (빈 이름 = 미지정) */
 export async function saveChannelOwners(input: unknown): Promise<SaveResult> {
+  if (!(await getSession())) return NO_SESSION;
   const parsed = ChannelOwnerInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: '입력값 형식이 올바르지 않습니다.' };
   const { user, entries } = parsed.data;
@@ -96,6 +102,7 @@ const TargetRowsInput = z.object({
 
 /** 목표 시트에 그 달 제품 행(YYYYMM·MATNR·제품명)만 추가한다. 이미 있는 제품은 건너뛴다. 금액은 시트에서 입력 */
 export async function appendTargetRows(input: unknown): Promise<SaveResult> {
+  if (!(await getSession())) return NO_SESSION;
   const parsed = TargetRowsInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: '입력값 형식이 올바르지 않습니다.' };
   const { ym, items } = parsed.data;
@@ -121,6 +128,7 @@ const LineOwnerInput = z.object({
 
 /** 제품라인별 CM·PM 이름 저장. 제품라인 기준으로 기존 행은 덮어쓰고 없으면 추가한다 (빈 이름 = 시트 기본값 사용). */
 export async function saveLineOwners(input: unknown): Promise<SaveResult> {
+  if (!(await getSession())) return NO_SESSION;
   const parsed = LineOwnerInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: '입력값 형식이 올바르지 않습니다.' };
   const { user, entries } = parsed.data;
@@ -152,6 +160,7 @@ const AppendMap = z.array(z.object({ matnr: z.string().min(1).max(40), name: z.s
 
 /** 미매핑 품목을 product_map 탭에 (MATNR, 제품명)만 채워 추가한다. CM·카테고리·담당자는 시트에서 직접 입력. */
 export async function appendUnmappedProducts(input: unknown): Promise<SaveResult> {
+  if (!(await getSession())) return NO_SESSION;
   const parsed = AppendMap.safeParse(input);
   if (!parsed.success) return { ok: false, error: '입력값 형식이 올바르지 않습니다.' };
   try {
@@ -170,6 +179,7 @@ export async function appendUnmappedProducts(input: unknown): Promise<SaveResult
 
 /** 캐시를 비우고 BigQuery·시트를 다시 읽는다 */
 export async function refreshAll(): Promise<void> {
+  if (!(await getSession())) throw new Error('로그인이 필요합니다.');
   updateTag('bq');
   updateTag('manual');
 }
