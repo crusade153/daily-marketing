@@ -70,7 +70,7 @@ function capOf(values: number[]): number {
 
 const fmtCell = (v: number | null, m: TrendMetric) => (v == null ? '-' : isRate(m) ? pct(v) : mil(v));
 
-export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[] }) {
+export default function TrendView({ data, axes, ym = null }: { data: TrendData; axes: Axis[]; ym?: string | null }) {
   const router = useRouter();
   const [navPending, startNav] = useTransition();
   const [metric, setMetric] = useState<TrendMetric>('gpm');
@@ -128,7 +128,7 @@ export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[
 
   const setAxis = (a: Axis) => {
     setFocusKey(null);
-    startNav(() => router.push(`/trend?axis=${a}`, { scroll: false }));
+    startNav(() => router.push(`/trend?axis=${a}${ym ? `&ym=${ym}` : ''}`, { scroll: false }));
   };
 
   const scopeLabel = focus ? focus.label : '전체';
@@ -393,6 +393,7 @@ export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[
                     >
                       {monthLabel(m.ym)}
                       {m.kind === 'fcst' && <span className="ml-0.5 text-[10px]">예상</span>}
+                      {m.costEst && <span className="ml-0.5 text-[10px] text-neg" title="원가 결산 전이라 3개월 평균 단위원가로 추정한 원가">원가추정</span>}
                       {needsInput(metric) && (
                         <span className={`block text-[10px] font-normal ${m.filled ? '' : 'text-neg'}`}>
                           {m.ledger ? 'SAP 원장' : m.filled ? `입력 ${m.filled}/${m.chTotal}` : '미입력'}

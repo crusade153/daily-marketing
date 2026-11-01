@@ -16,6 +16,7 @@ import type {
   Hierarchy,
   LineOwner,
   MaterialFact,
+  MaterialHist,
   MaterialRow,
   MonthRow,
   ProductMap,
@@ -108,9 +109,45 @@ export function forecastFactor(elapsed: number, daysInMonth: number): number {
   return elapsed > 0 ? daysInMonth / elapsed : 0;
 }
 
+/**
+ * 원가 마감 판정: 그 달 CO-PA 실제원가가 매출의 절반 이상 들어왔으면 마감.
+ * 마감 전에는 원가가 매출의 1% 안팎, 마감 후 95~110% (2026-04~10 확인)라 경계가 뚜렷하다.
+ */
+export const COST_CLOSE_RATIO = 0.5;
+export const costClosed = (cogs: number, sales: number) => sales > 0 && cogs >= sales * COST_CLOSE_RATIO;
+
+/**
+ * 당월 전 4개월 중 원가가 마감된 최근 3개월을 원가 평균 기준으로 삼는다.
+ * 전월이 마감 전이면 한 달 앞으로 밀린다 (11월에 10월이 마감 전이면 7~9월).
+ * 마감된 달이 하나도 없으면(데이터 이상) 최근 3개월을 그대로 쓴다.
+ */
+export function applyCostBasis(raws: MaterialHist[], histYms: string[]) {
+  const total = (k: 'histSales' | 'histCogs') => histYms.map((_, i) => raws.reduce((s, r) => s + (r[k][i] ?? 0), 0));
+  const sales = total('histSales');
+  const cogs = total('histCogs');
+  const closed = histYms.map((_, i) => costClosed(cogs[i], sales[i]));
+  const closedIdx = histYms.map((_, i) => i).filter((i) => closed[i]);
+  const idx = (closedIdx.length ? closedIdx : histYms.map((_, i) => i)).slice(-3);
+  const pick = (v: number[]) => idx.reduce((s, i) => s + (v[i] ?? 0), 0);
+  const facts: MaterialFact[] = raws.map(({ histQty, histSales, histCogs, ...f }) => ({
+    ...f,
+    costQty: pick(histQty),
+    costSales: pick(histSales),
+    costCogs: pick(histCogs),
+  }));
+  const curSales = raws.reduce((s, r) => s + r.curSales, 0);
+  const curCogs = raws.reduce((s, r) => s + r.curCogs, 0);
+  return {
+    facts,
+    costYms: idx.map((i) => histYms[i]),
+    prevClosed: closed[closed.length - 1] ?? false,
+    curClosed: costClosed(curCogs, curSales),
+  };
+}
+
 type RateTable = { l2: Map<string, number>; l1: Map<string, number>; all: number | null };
 
-/** 3개월 원가율(원가 ÷ 매출) — 단위원가가 없는 품목의 대체용 */
+/** 원가 기준 3개월 원가율(원가 ÷ 매출) — 단위원가가 없는 품목의 대체용 */
 export function costRates(facts: MaterialFact[]): RateTable {
   const acc = (m: Map<string, [number, number]>, k: string, f: MaterialFact) => {
     const v = m.get(k) ?? [0, 0];
@@ -140,6 +177,30 @@ export function estimateCogs(f: MaterialFact, rates: RateTable): { cogs: number;
   const rate = rates.l2.get(f.l2) ?? rates.l1.get(f.l1) ?? rates.all;
   if (rate == null) return { cogs: 0, method: 'none' };
   return { cogs: f.curSales * rate, method: 'rate' };
+}
+
+/** 제품 × 채널 한 줄의 추정 원가: 원가 기준 3개월 단위원가 × 수량, 이력이 없으면 계층 원가율 × 매출 */
+function channelCogs(c: ChannelFact, f: MaterialFact | undefined, rates: RateTable): { cogs: number; method: CostMethod } {
+  if (f) return estimateCogs({ ...f, curQty: c.qty, curSales: c.sales }, rates);
+  return { cogs: rates.all != null ? c.sales * rates.all : 0, method: rates.all != null ? 'rate' : 'none' };
+}
+
+/** 한 달 채널 실적의 원가 결산 여부 (CO-PA 실제원가 합 ÷ 매출 합) */
+export function factsClosed(list: ChannelFact[]): boolean {
+  let cogs = 0;
+  let sales = 0;
+  for (const c of list) {
+    cogs += c.cogs;
+    sales += c.sales;
+  }
+  return costClosed(cogs, sales);
+}
+
+/** 원가 결산 전인 달의 채널 실적: CO-PA 원가(거의 0) 대신 당월 예상과 같은 방식의 추정 원가를 넣는다 */
+export function estimateFactsCogs(list: ChannelFact[], facts: MaterialFact[]): ChannelFact[] {
+  const factBy = new Map(facts.map((f) => [f.matnr, f]));
+  const rates = costRates(facts);
+  return list.map((c) => ({ ...c, cogs: channelCogs(c, factBy.get(c.matnr), rates).cogs }));
 }
 
 /**
@@ -336,10 +397,7 @@ export function buildRows(params: {
   };
   for (const c of cur) {
     const r = at(c);
-    const f = factBy.get(c.matnr);
-    const est = f
-      ? estimateCogs({ ...f, curQty: c.qty, curSales: c.sales }, rates)
-      : { cogs: rates.all != null ? c.sales * rates.all : 0, method: rates.all != null ? ('rate' as const) : ('none' as const) };
+    const est = channelCogs(c, factBy.get(c.matnr), rates);
     r.costMethod = est.method;
     r.mtd = { ...ZERO, sales: c.sales, qty: c.qty, cogs: est.cogs };
     r.fcst = scaleAmounts(r.mtd, k);

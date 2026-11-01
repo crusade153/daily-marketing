@@ -18,11 +18,15 @@ import {
   sortGroups,
   totalOf,
   unitPrice,
+  applyCostBasis,
+  costClosed,
+  estimateFactsCogs,
+  factsClosed,
 } from '../lib/pnl.ts';
 import { getPeriods, progressOf, shiftYm, ymRange } from '../lib/period.ts';
 import { pricePoints } from '../lib/price.ts';
 import { aggregateTrend, buildBridge, metricValue } from '../lib/trend.ts';
-import type { ChannelFact, ChannelInput, Hierarchy, MaterialFact, ProductMap } from '../lib/types.ts';
+import type { ChannelFact, ChannelInput, Hierarchy, MaterialFact, MaterialHist, ProductMap } from '../lib/types.ts';
 
 const H = (l1: string, l2: string, l3 = `${l2}0`, l4 = `${l3}0`): Hierarchy => ({
   l1,
@@ -323,4 +327,49 @@ test('판매단가: 동일제품 단가 변동과 믹스 효과를 나눈다', (
   assert.ok(Math.abs(feb.avgChg! - (avg1 / avg0 - 1)) < 1e-12);
   assert.ok(Math.abs((1 + feb.priceChg!) * (1 + feb.mixChg!) - (1 + feb.avgChg!)) < 1e-12);
   assert.ok(Math.abs(feb.coverage! - 4100 / 5600) < 1e-12);
+});
+
+const hist = (matnr: string, q: number[], s: number[], g: number[], o: Partial<MaterialHist> = {}): MaterialHist => ({
+  ...fact({ matnr }),
+  curCogs: 0,
+  histQty: q,
+  histSales: s,
+  histCogs: g,
+  ...o,
+});
+
+test('원가 마감 판정: 원가가 매출의 절반 이상이면 마감', () => {
+  assert.equal(costClosed(103, 100), true);
+  assert.equal(costClosed(1.2, 100), false);
+  assert.equal(costClosed(0, 0), false);
+});
+
+test('원가 기준: 전월이 결산 전이면 한 달 앞 3개월 (11월 → 7~9월)', () => {
+  const yms = ['202607', '202608', '202609', '202610'];
+  // 10월은 원가가 거의 없다 (결산 전)
+  const r = applyCostBasis([hist('a', [10, 10, 10, 10], [100, 100, 100, 100], [100, 110, 100, 1])], yms);
+  assert.deepEqual(r.costYms, ['202607', '202608', '202609']);
+  assert.equal(r.prevClosed, false);
+  assert.equal(r.facts[0].costQty, 30);
+  assert.equal(r.facts[0].costCogs, 310);
+  const closed = applyCostBasis([hist('a', [10, 10, 10, 10], [100, 100, 100, 100], [100, 110, 100, 95])], yms);
+  assert.deepEqual(closed.costYms, ['202608', '202609', '202610']);
+  assert.equal(closed.prevClosed, true);
+  assert.equal(closed.facts[0].costCogs, 305);
+});
+
+test('원가 기준: 당월 원가가 들어왔으면 당월 마감', () => {
+  const r = applyCostBasis([hist('a', [1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1], { curSales: 100, curCogs: 98 })], ['1', '2', '3', '4']);
+  assert.equal(r.curClosed, true);
+});
+
+test('원가 결산 전인 달: CO-PA 원가 대신 원가 기준 단위원가 × 수량으로 추정', () => {
+  const list = [cf('a', '1', 1000, 10, 5), cf('z', '1', 500, 5, 0)];
+  assert.equal(factsClosed(list), false);
+  assert.equal(factsClosed([cf('a', '1', 1000, 10, 980)]), true);
+  const facts = [fact({ matnr: 'a', costQty: 30, costCogs: 2400, costSales: 3000 })];
+  const est = estimateFactsCogs(list, facts);
+  assert.equal(est[0].cogs, 800); // 10 × 80
+  assert.equal(est[1].cogs, 400); // 이력 없는 제품 = 전체 원가율 0.8 × 매출
+  assert.equal(list[0].cogs, 5); // 원본은 그대로
 });

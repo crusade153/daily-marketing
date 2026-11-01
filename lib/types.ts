@@ -33,9 +33,17 @@ export interface MaterialFact extends Hierarchy {
   prevSales: number;
   prevQty: number;
   prevCogs: number;
-  costQty: number; // 3개월 수량 (EA)
-  costSales: number; // 3개월 매출
-  costCogs: number; // 3개월 실제원가
+  costQty: number; // 원가 기준 3개월 수량 (EA)
+  costSales: number; // 원가 기준 3개월 매출
+  costCogs: number; // 원가 기준 3개월 실제원가
+}
+
+/** BigQuery에서 받는 형태: 당월 전 4개월 월별 값. 원가 마감 여부를 보고 3개월을 골라 MaterialFact로 바꾼다 (pnl.ts applyCostBasis) */
+export interface MaterialHist extends Omit<MaterialFact, 'costQty' | 'costSales' | 'costCogs'> {
+  curCogs: number; // 당월 CO-PA 실제원가 (마감 여부 판단용)
+  histQty: number[]; // Periods.histYms 순서 (오래된 달 → 전월)
+  histSales: number[];
+  histCogs: number[];
 }
 
 /** BigQuery 품목별 마감월 실적 (올해 1월 ~ 전월). 월 키는 YYYYMM */
@@ -163,6 +171,10 @@ export interface DashboardData {
   curYm: string;
   prevYm: string;
   costYms: string[];
+  /** 화면에 나오는 달 중 원가가 아직 마감되지 않은 달 (진행 중인 당월은 빼고) */
+  costOpen: string[];
+  /** 원가 결산 전이라 CO-PA 원가 대신 추정 원가를 넣은 지난달 */
+  costEstYms: string[];
   dataDate: string | null;
   progress: { elapsed: number; daysInMonth: number; rate: number };
   rows: MaterialRow[];

@@ -4,7 +4,9 @@ export interface Periods {
   today: string; // YYYYMMDD
   curYm: string; // 당월
   prevYm: string; // 전월
-  costYms: string[]; // 원가 평균 대상 3개월 (오래된 달 → 최근 달)
+  costYms: string[]; // 원가 평균 기본 3개월 (오래된 달 → 최근 달). 전월이 마감 전이면 한 달 앞으로 밀린다 (pnl.ts applyCostBasis)
+  histYms: string[]; // 원가 기준 후보 4개월 (당월 전 4개월)
+  histStart: string;
   curStart: string;
   curEnd: string; // 당월 말일
   prevStart: string;
@@ -52,6 +54,8 @@ export function getPeriods(today: string = kstToday()): Periods {
     curYm,
     prevYm,
     costYms,
+    histYms: [shiftYm(curYm, -4), ...costYms],
+    histStart: `${shiftYm(curYm, -4)}01`,
     curStart: `${curYm}01`,
     curEnd: monthEnd(curYm),
     prevStart: `${prevYm}01`,

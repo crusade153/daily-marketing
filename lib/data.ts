@@ -1,8 +1,8 @@
 import 'server-only';
 import { unstable_cache } from 'next/cache';
 import { runQuery } from './bigquery';
-import { getPeriods, monthEnd, monthLabel, progressOf, shiftYm, yearStartOf, ymRange, type Periods } from './period';
-import { applyLineOwners, buildMonthRows, buildRows, ORPHAN_NAME, type Axis } from './pnl';
+import { getPeriods, kstToday, monthEnd, monthLabel, progressOf, shiftYm, yearStartOf, ymRange, type Periods } from './period';
+import { applyCostBasis, applyLineOwners, buildMonthRows, buildRows, estimateFactsCogs, factsClosed, ORPHAN_NAME, type Axis } from './pnl';
 import { MOMENTUM_AXES, momentum, opBridge, whaleCurve, type InsightData, type InsightPair } from './insight';
 import { buildLedger, GENERAL_ITEMS, ledgerInputs, type GlMonthCost, type GlRow, type Ledger, type LedgerMonth } from './ledger';
 import { buildPriceTrend, type PriceItem, type PriceTrend } from './price';
@@ -18,6 +18,7 @@ import type {
   Hierarchy,
   LineOwner,
   MaterialFact,
+  MaterialHist,
   MonthFact,
   MonthRow,
   ProductMap,
@@ -65,54 +66,60 @@ const HIER_COLS = `t.MATNR_T AS name,
       t.PRDHA_1 AS l1, t.PRDHA_1_T AS l1t, t.PRDHA_2 AS l2, t.PRDHA_2_T AS l2t,
       t.PRDHA_3 AS l3, t.PRDHA_3_T AS l3t, t.PRDHA AS l4, t.PRDHA_T AS l4t`;
 
-async function queryMaterials(p: Periods): Promise<MaterialFact[]> {
+/** 당월·전월 + 당월 전 4개월 월별 값 (원가 마감 여부를 보고 그중 3개월을 원가 기준으로 고른다) */
+async function queryMaterials(p: Periods): Promise<MaterialHist[]> {
+  const hist = (col: string, as: string) => p.histYms.map((_, i) => `SUM(IF(ym = @h${i}, ${col}, 0)) AS ${as}${i}`).join(', ');
+  const histCols = ['hq', 'hs', 'hg'].flatMap((k) => p.histYms.map((_, i) => `a.${k}${i}`)).join(', ');
   const rows = await runQuery<Record<string, unknown>>(
     `
     WITH base AS (
-      SELECT c.ARTNR, c.BUDAT, c.ABSMG_EA AS q, c.VV101 AS s, c.VV_COGS_A AS g
+      SELECT c.ARTNR, c.BUDAT, SUBSTR(c.BUDAT, 1, 6) AS ym, c.ABSMG_EA AS q, c.VV101 AS s, c.VV_COGS_A AS g
       FROM ${COPA} c
-      WHERE ${COPA_FILTER} AND c.BUDAT BETWEEN @costStart AND @today
+      WHERE ${COPA_FILTER} AND c.BUDAT BETWEEN @histStart AND @today
     ),
     agg AS (
       SELECT ARTNR,
         SUM(IF(BUDAT BETWEEN @curStart AND @today, s, 0)) AS cur_sales,
         SUM(IF(BUDAT BETWEEN @curStart AND @today, q, 0)) AS cur_qty,
+        SUM(IF(BUDAT BETWEEN @curStart AND @today, g, 0)) AS cur_cogs,
         SUM(IF(BUDAT BETWEEN @prevStart AND @prevEnd, s, 0)) AS prev_sales,
         SUM(IF(BUDAT BETWEEN @prevStart AND @prevEnd, q, 0)) AS prev_qty,
         SUM(IF(BUDAT BETWEEN @prevStart AND @prevEnd, g, 0)) AS prev_cogs,
-        SUM(IF(BUDAT BETWEEN @costStart AND @costEnd, q, 0)) AS cost_qty,
-        SUM(IF(BUDAT BETWEEN @costStart AND @costEnd, s, 0)) AS cost_sales,
-        SUM(IF(BUDAT BETWEEN @costStart AND @costEnd, g, 0)) AS cost_cogs
+        ${hist('q', 'hq')},
+        ${hist('s', 'hs')},
+        ${hist('g', 'hg')}
       FROM base
       GROUP BY ARTNR
     )
     SELECT a.ARTNR AS matnr, ${HIER_COLS},
-      a.cur_sales, a.cur_qty, a.prev_sales, a.prev_qty, a.prev_cogs, a.cost_qty, a.cost_sales, a.cost_cogs
+      a.cur_sales, a.cur_qty, a.cur_cogs, a.prev_sales, a.prev_qty, a.prev_cogs, ${histCols}
     FROM agg a
     LEFT JOIN ${MARA} t ON t.MATNR = a.ARTNR
-    WHERE a.cur_sales != 0 OR a.cur_qty != 0 OR a.prev_sales != 0 OR a.prev_qty != 0 OR a.prev_cogs != 0
-       OR a.cost_qty != 0 OR a.cost_sales != 0 OR a.cost_cogs != 0
     `,
     {
       today: p.today,
       curStart: p.curStart,
       prevStart: p.prevStart,
       prevEnd: p.prevEnd,
-      costStart: p.costStart,
-      costEnd: p.costEnd,
+      histStart: p.histStart,
+      ...Object.fromEntries(p.histYms.map((ym, i) => [`h${i}`, ym])),
     },
   );
-  return rows.map((r) => ({
-    ...hier(r),
-    curSales: num(r.cur_sales),
-    curQty: num(r.cur_qty),
-    prevSales: num(r.prev_sales),
-    prevQty: num(r.prev_qty),
-    prevCogs: num(r.prev_cogs),
-    costQty: num(r.cost_qty),
-    costSales: num(r.cost_sales),
-    costCogs: num(r.cost_cogs),
-  }));
+  const arr = (r: Record<string, unknown>, k: string) => p.histYms.map((_, i) => num(r[`${k}${i}`]));
+  return rows
+    .map((r) => ({
+      ...hier(r),
+      curSales: num(r.cur_sales),
+      curQty: num(r.cur_qty),
+      curCogs: num(r.cur_cogs),
+      prevSales: num(r.prev_sales),
+      prevQty: num(r.prev_qty),
+      prevCogs: num(r.prev_cogs),
+      histQty: arr(r, 'hq'),
+      histSales: arr(r, 'hs'),
+      histCogs: arr(r, 'hg'),
+    }))
+    .filter((f) => f.curSales || f.curQty || f.curCogs || f.prevSales || f.prevQty || f.prevCogs || [...f.histQty, ...f.histSales, ...f.histCogs].some(Boolean));
 }
 
 async function queryDaily(p: Periods): Promise<DailyFact[]> {
@@ -195,7 +202,7 @@ function expandMonthly(raw: MonthlyRaw): MonthFact[] {
   });
 }
 
-const cachedMaterials = unstable_cache(async (today: string) => queryMaterials(getPeriods(today)), ['copa-materials-v2'], {
+const cachedMaterials = unstable_cache(async (today: string) => queryMaterials(getPeriods(today)), ['copa-materials-v3'], {
   revalidate: 3600,
   tags: ['bq'],
 });
@@ -478,11 +485,26 @@ function withLedgerCosts(manual: ChannelInput[], gl: GlMonthCost[], chFacts: Map
   return { inputs: [...manual, ...filled], ledgerYms: [...new Set(filled.map((i) => i.ym))] };
 }
 
+/**
+ * 원가 결산 전인 지난달(당월 제외)은 CO-PA 원가가 거의 0이라 실적 이익이 부풀려 보인다.
+ * 그 달 원가를 당월 예상과 같은 방식(원가 기준 3개월 단위원가)으로 추정해 넣는다.
+ */
+function withEstimatedCogs(chFacts: Map<string, ChannelFact[]>, facts: MaterialFact[], curYm: string) {
+  const out = new Map(chFacts);
+  const estYms: string[] = [];
+  for (const [ym, list] of chFacts) {
+    if (ym >= curYm || !list.length || factsClosed(list)) continue;
+    out.set(ym, estimateFactsCogs(list, facts));
+    estYms.push(ym);
+  }
+  return { chFacts: out, estYms };
+}
+
 // ── 대시보드 조립 ──────────────────────────────────────────────
 
 export async function getFacts(today?: string) {
   const p = getPeriods(today);
-  return { periods: p, facts: await cachedMaterials(p.today) };
+  return { periods: p, ...applyCostBasis(await cachedMaterials(p.today), p.histYms) };
 }
 
 const filledCount = (inputs: ChannelInput[], ym: string) => inputs.filter((i) => i.ym === ym && (i.incentive || i.general || i.rate)).length;
@@ -491,7 +513,7 @@ const channelCount = (rows: { ch: string; name: string }[], sales: (r: { ch: str
 
 export async function getDashboard(today?: string): Promise<DashboardData> {
   const p = getPeriods(today);
-  const [facts, daily, maps, manual, chFacts, reps, targets, gl] = await Promise.all([
+  const [hist, daily, maps, manual, rawChFacts, reps, targets, gl] = await Promise.all([
     cachedMaterials(p.today),
     cachedDaily(p.today),
     getEffectiveMap(),
@@ -501,7 +523,12 @@ export async function getDashboard(today?: string): Promise<DashboardData> {
     getTargets(),
     getGlCosts(p),
   ]);
+  const { facts, costYms, prevClosed, curClosed } = applyCostBasis(hist, p.histYms);
+  const { chFacts, estYms } = withEstimatedCogs(rawChFacts, facts, p.curYm);
   const { inputs, ledgerYms } = withLedgerCosts(manual, gl, chFacts);
+  // 진행 중인 당월은 당연히 마감 전이라 알리지 않는다. 지난달을 당월로 보는 화면(?ym)에서만 알린다
+  const live = p.curYm === kstToday().slice(0, 6);
+  const costOpen = [...(prevClosed ? [] : [p.prevYm]), ...(live || curClosed ? [] : [p.curYm])];
 
   const curDates = daily.filter((d) => d.date >= p.curStart).map((d) => d.date);
   const dataDate = curDates.length ? curDates.reduce((a, b) => (a > b ? a : b)) : null;
@@ -531,7 +558,9 @@ export async function getDashboard(today?: string): Promise<DashboardData> {
   return {
     curYm: p.curYm,
     prevYm: p.prevYm,
-    costYms: p.costYms,
+    costYms,
+    costOpen,
+    costEstYms: estYms,
     dataDate,
     progress,
     rows,
@@ -553,7 +582,7 @@ export async function getDashboard(today?: string): Promise<DashboardData> {
 export async function getMonthBlocks(today?: string) {
   const p = getPeriods(today);
   const closed = ymRange(yearStartOf(p.curYm), p.prevYm);
-  const [d, monthly, maps, manual, chFacts, reps, gl] = await Promise.all([
+  const [d, monthly, maps, manual, rawChFacts, reps, gl, { facts }] = await Promise.all([
     getDashboard(today),
     closed.length ? cachedMonthly(p.today).then(expandMonthly) : Promise.resolve([] as MonthFact[]),
     getEffectiveMap(),
@@ -561,13 +590,15 @@ export async function getMonthBlocks(today?: string) {
     getChannelFacts(p.today),
     getRepMap(),
     getGlCosts(p),
+    getFacts(today),
   ]);
+  const { chFacts, estYms } = withEstimatedCogs(rawChFacts, facts, p.curYm);
   const { inputs } = withLedgerCosts(manual, gl, chFacts);
   const dims = new Map(monthly.map((f) => [f.matnr, f]));
 
   const blocks: MonthBlock[] = closed.map((ym) => {
     const rows = buildMonthRows({ facts: chFacts.get(ym) ?? [], dims, maps, reps, inputs: inputs.filter((i) => i.ym === ym) });
-    return { ym, kind: 'actual', rows, filled: filledCount(inputs, ym), chTotal: channelCount(rows, (r) => (r as MonthRow).amt.sales), ledger: d.ledgerYms.includes(ym) || undefined };
+    return { ym, kind: 'actual', rows, filled: filledCount(inputs, ym), chTotal: channelCount(rows, (r) => (r as MonthRow).amt.sales), ledger: d.ledgerYms.includes(ym) || undefined, costEst: estYms.includes(ym) || undefined };
   });
   const curRows = toMonthRows(d.rows, 'fcst');
   blocks.push({
@@ -584,7 +615,7 @@ export async function getTrend(axis: Axis, today?: string): Promise<TrendData> {
   const { d, blocks } = await getMonthBlocks(today);
   return {
     axis,
-    months: blocks.map(({ ym, kind, filled, chTotal, ledger }) => ({ ym, kind, filled, chTotal, ledger })),
+    months: blocks.map(({ ym, kind, filled, chTotal, ledger, costEst }) => ({ ym, kind, filled, chTotal, ledger, costEst })),
     ...aggregateTrend(blocks, axis),
     dataDate: d.dataDate,
   };

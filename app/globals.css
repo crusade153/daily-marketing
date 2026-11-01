@@ -99,6 +99,7 @@ a.month-step:hover { background: var(--accent-soft); color: var(--accent); }
 .basis-popover { position: absolute; right: 0; top: calc(100% + 8px); z-index: 10; width: 350px; max-width: 80vw; padding: 16px; background: white; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 30px #1b2d461a; line-height: 1.8; }
 .basis-popover b { display: block; margin-bottom: 6px; }
 .notice-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 18px; padding: 9px 13px; background: #fff9ed; border: 1px solid #f0e3c5; border-radius: 7px; color: #7b5c28; font-size: 12px; }
+.notice-alert { color: var(--neg); }
 .notice-label { font-weight: 700; padding-right: 12px; border-right: 1px solid #e3d4b5; }
 .notice-action { margin-left: auto; font-weight: 700; white-space: nowrap; }
 .kpi-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; }
