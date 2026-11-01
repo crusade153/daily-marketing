@@ -48,7 +48,7 @@ interface Ctx {
   m: Metrics;
   p: Metrics;
   t: [number, number, number] | null; // 목표 [매출, GP, OP]
-  price: number | null; // 제품 하나일 때 판가
+  price: number | null; // 총매출 ÷ 수량 (묶음은 수량 가중평균)
   prevPrice: number | null;
   priceChg: number | null; // 제품 하나면 단가 증감, 여러 개면 동일제품 단가 변동률
   single: boolean;
@@ -70,7 +70,7 @@ const achCell = (actual: number, target: number | undefined) => {
   return { v: pct(r), cls: r == null ? 'text-muted' : r >= 1 ? 'text-[var(--pos)]' : 'text-[var(--neg)]' };
 };
 const priceCols: Col[] = [
-  { id: 'price', group: '판가 (원/EA)', label: '판가', title: '총매출 ÷ 판매수량 (제품 단위)', cell: (c) => ({ v: c.price == null ? '-' : won(c.price) }) },
+  { id: 'price', group: '판가 (원/EA)', label: '판가', title: '총매출 ÷ 판매수량 (묶음·합계는 수량 가중평균)', cell: (c) => ({ v: c.price == null ? '-' : won(c.price) }) },
   {
     id: 'pchg',
     group: '판가 (원/EA)',
@@ -204,8 +204,9 @@ export default function PnlPivot({
   };
   const ctxOf = (g: Pick<Group, 'mtd' | 'fcst' | 'prev' | 'prev2' | 'rows'>, channelSplit: boolean): Ctx => {
     const single = g.rows.length > 0 && g.rows.every((r) => r.matnr === g.rows[0].matnr);
-    const price = single ? unitPrice(g[scenario]) : null;
-    const prevPrice = single ? unitPrice(g[base]) : null;
+    // 묶음·합계는 총매출 ÷ 총수량 = 수량 가중평균 판가. 증감은 구성 변화를 빼려고 동일제품 단가 변동률을 그대로 쓴다
+    const price = unitPrice(g[scenario]);
+    const prevPrice = unitPrice(g[base]);
     return {
       m: metrics(g[scenario]),
       p: metrics(g[base]),
@@ -364,7 +365,7 @@ export default function PnlPivot({
         </dl>
         {(c.price != null || c.priceChg != null) && (
           <p className="m-price">
-            판가 {c.price != null ? `${won(c.price)}원` : '(묶음)'}
+            판가 {c.price != null ? `${won(c.price)}원` : '-'}
             {c.priceChg != null && <span className={tone(c.priceChg)}> {c.single ? '전월비' : '동일제품'} {pct(c.priceChg)}</span>}
           </p>
         )}
