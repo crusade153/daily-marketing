@@ -10,6 +10,7 @@ export interface TrendMonth {
   kind: MonthKind;
   filled: number; // 장려금·일반비를 입력한 채널(고객그룹3) 수
   chTotal: number; // 그 달 매출이 있는 채널 수
+  ledger?: boolean; // 장려금·일반비를 SAP 원장 실적으로 채운 달
 }
 
 export interface MonthBlock extends TrendMonth {

@@ -1,7 +1,7 @@
 // node --test tests/  (Node 24 타입 제거 실행)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildLedger, closedIdx, groupOfItem, statementOf, type GlRow, type LedgerMonth } from '../lib/ledger.ts';
+import { buildLedger, closedIdx, GENERAL_ITEMS, groupOfItem, ledgerInputs, statementOf, type GlRow, type LedgerMonth } from '../lib/ledger.ts';
 
 const gl = (ym: string, acct: string, acctName: string, amt: number, cc = '', ccName = ''): GlRow => ({ ym, acct, acctName, cc, ccName, amt });
 
@@ -58,4 +58,31 @@ test('판관비 분류: 계정 앞 6자리, 목록 밖은 기타 경비', () => 
   assert.equal(groupOfItem('612010').key, 'people');
   assert.equal(groupOfItem('613024').key, 'marketing');
   assert.equal(groupOfItem('613003').key, 'other');
+});
+
+test('원장 장려금·일반비를 채널 총매출 비중으로 나눈다 (매출 0 이하 채널·원장 없는 달은 제외)', () => {
+  const sales = new Map([
+    ['202609', [
+      { ch: 'A', cht: '할인점', sales: 300 },
+      { ch: 'A', cht: '할인점', sales: 100 },
+      { ch: 'B', cht: '온라인', sales: 100 },
+      { ch: 'C', cht: '반품', sales: -50 },
+    ]],
+    ['202608', [{ ch: 'A', cht: '할인점', sales: 100 }]],
+  ]);
+  const out = ledgerInputs([{ ym: '202609', adj: 50, general: 20 }], sales);
+  assert.equal(out.length, 2);
+  const a = out.find((i) => i.ch === 'A')!;
+  assert.equal(a.incentive, 40);
+  assert.equal(a.general, 16);
+  assert.equal(a.rate, 0);
+  assert.equal(out.reduce((s, i) => s + i.incentive, 0), 50);
+  assert.ok(out.every((i) => i.ym === '202609'));
+});
+
+test('일반비 항목은 물류·광고판촉·수수료 분류만 (인건비·외주용역 제외)', () => {
+  assert.ok(GENERAL_ITEMS.includes('613014'));
+  assert.ok(GENERAL_ITEMS.includes('613024'));
+  assert.ok(!GENERAL_ITEMS.includes('612010'));
+  assert.ok(!GENERAL_ITEMS.includes('613021'));
 });

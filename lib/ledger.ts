@@ -6,6 +6,8 @@
 // 계정 이름은 바뀐 적이 있어(접대비 → 업무추진비) 계정 번호 앞 6자리로 묶고, 이름은 가장 최근 전표의 이름을 쓴다.
 // 마감 전인 달(당월)은 원장이 덜 들어와 있으므로 매출조정·판관비를 최근 마감 3개월 평균으로 추정한다.
 
+import type { ChannelInput } from './types';
+
 /** 원장 집계 한 줄: 월 × 계정 × 코스트센터 */
 export interface GlRow {
   ym: string;
@@ -180,3 +182,46 @@ export function statementOf(l: Ledger, at: number[]): Statement {
 
 /** 마감(잠정 포함) 달의 위치 */
 export const closedIdx = (l: Pick<Ledger, 'months'>) => l.months.flatMap((m, i) => (m.kind === 'estimate' ? [] : [i]));
+
+// ── 수기 입력이 없는 마감월의 장려금·일반비를 원장 실적으로 채우기 ──────────
+
+/**
+ * 대시보드 '일반비'에 해당하는 판관비 분류 (SGA_GROUPS 키): 물류비·광고판촉비·수수료.
+ * 인건비·외주용역·감가상각 같은 공통비는 넣지 않는다 — 2026-10 수기 일반비 18.7억 ≈ 2026-09 원장 이 세 분류 17.6억.
+ */
+export const GENERAL_GROUPS = ['logistics', 'marketing', 'fees'];
+export const GENERAL_ITEMS = SGA_GROUPS.filter((g) => GENERAL_GROUPS.includes(g.key)).flatMap((g) => g.items);
+
+/** 원장 월 합계: adj = 매출조정(41xx, 장려금), general = GENERAL_ITEMS 판관비 */
+export interface GlMonthCost {
+  ym: string;
+  adj: number;
+  general: number;
+}
+
+export const LEDGER_AUTHOR = 'SAP 원장';
+
+/**
+ * 원장 월 합계를 그 달 채널(고객그룹3) 총매출 비중으로 나눠 채널 입력값처럼 만든다.
+ * 그 뒤 제품 배부는 수기 입력과 같은 길(채널 안 제품 총매출 비중)을 탄다.
+ * 매출이 0 이하인 채널은 받지 않는다. 원장 합계가 없는 달은 건너뛴다.
+ */
+export function ledgerInputs(costs: GlMonthCost[], salesByMonth: Map<string, { ch: string; cht: string; sales: number }[]>): ChannelInput[] {
+  const out: ChannelInput[] = [];
+  for (const c of costs) {
+    const chs = new Map<string, { cht: string; sales: number }>();
+    for (const f of salesByMonth.get(c.ym) ?? []) {
+      const a = chs.get(f.ch) ?? { cht: f.cht, sales: 0 };
+      a.sales += f.sales;
+      chs.set(f.ch, a);
+    }
+    const pos = [...chs].filter(([, a]) => a.sales > 0);
+    const total = pos.reduce((s, [, a]) => s + a.sales, 0);
+    if (!total || (!c.adj && !c.general)) continue;
+    for (const [ch, a] of pos) {
+      const share = a.sales / total;
+      out.push({ ym: c.ym, ch, cht: a.cht, incentive: c.adj * share, general: c.general * share, rate: 0, updatedAt: '', updatedBy: LEDGER_AUTHOR });
+    }
+  }
+  return out;
+}

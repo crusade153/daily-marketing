@@ -395,7 +395,7 @@ export default function TrendView({ data, axes }: { data: TrendData; axes: Axis[
                       {m.kind === 'fcst' && <span className="ml-0.5 text-[10px]">예상</span>}
                       {needsInput(metric) && (
                         <span className={`block text-[10px] font-normal ${m.filled ? '' : 'text-neg'}`}>
-                          {m.filled ? `입력 ${m.filled}/${m.chTotal}` : '미입력'}
+                          {m.ledger ? 'SAP 원장' : m.filled ? `입력 ${m.filled}/${m.chTotal}` : '미입력'}
                         </span>
                       )}
                     </button>

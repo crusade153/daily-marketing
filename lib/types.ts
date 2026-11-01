@@ -169,6 +169,8 @@ export interface DashboardData {
   coverage: { unitSales: number; rateSales: number; noneSales: number };
   /** 비용 입력 현황: 매출 있는 채널 수, 당월·전월 입력한 채널 수 */
   inputStatus: { chTotal: number; curFilled: number; prevFilled: number };
+  /** 수기 입력이 없어 장려금·일반비를 SAP 원장 실적으로 채운 달 (YYYYMM) */
+  ledgerYms: string[];
   /** 당월·전월 제품 목표 */
   targets: { cur: TargetMap; prev: TargetMap };
   storage: 'sheets' | 'local';
