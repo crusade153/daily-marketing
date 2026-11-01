@@ -6,7 +6,7 @@ import CategoryOverview from '@/components/category-overview';
 import PnlStatement from '@/components/pnl-statement';
 import PriceTrend from '@/components/price-trend';
 import { getDashboard, getPriceTrend } from '@/lib/data';
-import { kstToday, monthEnd, shiftYm } from '@/lib/period';
+import { monthLinks, selectMonth } from '@/lib/month';
 import { groupBy, metrics, sortGroups, totalOf, type Axis } from '@/lib/pnl';
 
 export const dynamic = 'force-dynamic';
@@ -18,31 +18,17 @@ const OVERVIEW_AXES: { id: Axis; label: string }[] = [
   { id: 'ch', label: '채널' },
 ];
 
-/** 기준월은 당월과 직전 1개월만 고를 수 있다 (월초 결산 전에 전월을 '예상'으로 보려는 용도) */
-const BACK_MONTHS = 1;
-
-const monthHref = (ym: string, curYm: string) => (ym === curYm ? '/' : `/?ym=${ym}`);
-
 export default async function SummaryPage({
   searchParams,
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const { ym: q } = await searchParams;
-  const curYm = kstToday().slice(0, 6);
-  const minYm = shiftYm(curYm, -BACK_MONTHS);
-  const ym = typeof q === 'string' && /^\d{6}$/.test(q) && q >= minYm && q < curYm ? q : curYm;
-  // 지난달을 고르면 그 달 말일을 '오늘'로 놓고 계산한다 → 그 달이 당월(예상), 그 전달이 전월(실적)
-  const today = ym === curYm ? undefined : monthEnd(ym);
-  const [d, price] = await Promise.all([getDashboard(today), getPriceTrend(today)]);
+  const sel = selectMonth((await searchParams).ym);
+  const [d, price] = await Promise.all([getDashboard(sel.today), getPriceTrend(sel.today)]);
   const total = totalOf(d.rows);
   return (
     <div className="summary-page">
-      <PeriodBar
-        d={d}
-        prevHref={ym > minYm ? monthHref(shiftYm(ym, -1), curYm) : null}
-        nextHref={ym < curYm ? monthHref(shiftYm(ym, 1), curYm) : null}
-      />
+      <PeriodBar d={d} nav={monthLinks('/', sel)} />
       <Notices d={d} />
       <AnalysisTabs label="요약 분석" tabs={[
         { label: '손익 현황', content: <div className="overview-content">

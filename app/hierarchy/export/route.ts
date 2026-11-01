@@ -1,5 +1,7 @@
 import ExcelJS from 'exceljs';
+import type { NextRequest } from 'next/server';
 import { getMonthBlocks } from '@/lib/data';
+import { selectMonth } from '@/lib/month';
 import { metrics } from '@/lib/pnl';
 import { monthLabel } from '@/lib/period';
 import type { Amounts, RowDims } from '@/lib/types';
@@ -50,8 +52,8 @@ function styleHeader(ws: ExcelJS.Worksheet) {
 }
 
 /** 손익 RAW: 제품 × 채널 단위 원천. 시트 1 당월·전월, 시트 2 올해 월별(긴 형식), 시트 3 기준 */
-export async function GET() {
-  const { d, blocks } = await getMonthBlocks();
+export async function GET(request: NextRequest) {
+  const { d, blocks } = await getMonthBlocks(selectMonth(request.nextUrl.searchParams.get('ym')).today);
   const cur = monthLabel(d.curYm);
   const prv = monthLabel(d.prevYm);
   const wb = new ExcelJS.Workbook();

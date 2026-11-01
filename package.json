@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test tests/pnl.test.ts tests/segment.test.ts tests/insight.test.ts tests/ledger.test.ts"
+    "test": "node --test tests/pnl.test.ts tests/segment.test.ts tests/insight.test.ts tests/ledger.test.ts tests/month.test.ts"
   },
   "dependencies": {
     "@google-cloud/bigquery": "^8.3.1",

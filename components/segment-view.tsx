@@ -280,17 +280,28 @@ function CutControl({
   );
 }
 
+const segmentHref = (ch: string, ym: string | null) => {
+  const q = new URLSearchParams();
+  if (ch) q.set('ch', ch);
+  if (ym) q.set('ym', ym);
+  const s = q.toString();
+  return s ? `/segment?${s}` : '/segment';
+};
+
 export default function SegmentView({
   products,
   periods,
   channels,
   channel,
+  monthYm = null,
 }: {
   products: SegProduct[];
   periods: SegmentPeriodMeta[];
   /** 채널(고객그룹3) 필터 — 바꾸면 서버에서 그 채널 금액만 다시 모은다 */
   channels: { code: string; name: string }[];
   channel: string | null;
+  /** 지난달을 기준월로 볼 때 그 달 (채널을 바꿔도 유지) */
+  monthYm?: string | null;
 }) {
   const router = useRouter();
   const [chPending, startCh] = useTransition();
@@ -542,7 +553,7 @@ export default function SegmentView({
                 onChange={(e) => {
                   const v = e.target.value;
                   resetFilters();
-                  startCh(() => router.push(v ? `/segment?ch=${encodeURIComponent(v)}` : '/segment', { scroll: false }));
+                  startCh(() => router.push(segmentHref(v, monthYm), { scroll: false }));
                 }}
                 aria-label="채널 필터"
               >

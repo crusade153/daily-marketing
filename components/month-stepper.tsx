@@ -1,7 +1,7 @@
 'use client';
 
 import Link, { useLinkStatus } from 'next/link';
-import { monthLabel } from '@/lib/period';
+import { monthLabel, shiftYm } from '@/lib/period';
 
 /** 이동 중 표시: 새 달 데이터를 불러오는 동안 화살표를 흐리게 (조회에 몇 초 걸릴 수 있다) */
 function Arrow({ dir }: { dir: 'prev' | 'next' }) {
@@ -20,12 +20,13 @@ function Step({ href, dir }: { href: string | null; dir: 'prev' | 'next' }) {
   );
 }
 
-export default function MonthStepper({ curYm, prevYm, prevHref, nextHref }: { curYm: string; prevYm: string; prevHref: string | null; nextHref: string | null }) {
+/** 화면 공통 기준월 이동. 주소는 lib/month.ts monthLinks로 만든다 */
+export default function MonthStepper({ ym, prevHref, nextHref }: { ym: string; prevHref: string | null; nextHref: string | null }) {
   return (
     <nav className="month-stepper" aria-label="기준월 이동">
       <Step href={prevHref} dir="prev" />
       <span className="month-stepper-label">
-        {monthLabel(prevYm)} 실적 <i aria-hidden="true">·</i> <b>{monthLabel(curYm)} 예상</b>
+        {monthLabel(shiftYm(ym, -1))} 실적 <i aria-hidden="true">·</i> <b>{monthLabel(ym)} 예상</b>
       </span>
       <Step href={nextHref} dir="next" />
     </nav>

@@ -16,6 +16,7 @@ export default function PnlExplorer({
   progressRate,
   targets,
   initialView,
+  exportHref,
 }: {
   rows: MaterialRow[];
   curYm: string;
@@ -23,6 +24,8 @@ export default function PnlExplorer({
   progressRate: number;
   targets: { cur: TargetMap; prev: TargetMap };
   initialView: ExplorerView;
+  /** 원천 다운로드 주소 (고른 기준월 포함) */
+  exportHref: string;
 }) {
   const [view, setView] = useState<ExplorerView>(initialView);
   // 제품 목록은 제품 한 줄 (채널 행을 합친다)
@@ -39,7 +42,7 @@ export default function PnlExplorer({
         <button type="button" aria-pressed={view === 'product'} onClick={() => choose('product')}>제품 목록</button>
       </div>
       {view === 'pivot' ? (
-        <PnlPivot mode="product" rows={rows} curYm={curYm} prevYm={prevYm} progressRate={progressRate} targets={targets} exportHref="/hierarchy/export" />
+        <PnlPivot mode="product" rows={rows} curYm={curYm} prevYm={prevYm} progressRate={progressRate} targets={targets} exportHref={exportHref} />
       ) : (
         <ProductTable rows={products} curYm={curYm} prevYm={prevYm} />
       )}

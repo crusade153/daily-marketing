@@ -1,5 +1,7 @@
 import TrendView from '@/components/trend-view';
+import MonthStepper from '@/components/month-stepper';
 import { getTrend } from '@/lib/data';
+import { monthLinks, selectMonth } from '@/lib/month';
 import type { Axis } from '@/lib/pnl';
 
 export const dynamic = 'force-dynamic';
@@ -13,16 +15,18 @@ export default async function TrendPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const { axis: q } = await searchParams;
+  const { axis: q, ym } = await searchParams;
   const axis = AXES.find((a) => a === q) ?? 'cm';
-  const data = await getTrend(axis);
+  const sel = selectMonth(ym);
+  const data = await getTrend(axis, sel.today);
   return (
     <div className="space-y-4">
       <div className="page-intro">
         <h1>월별 실적 추이</h1>
+        <MonthStepper {...monthLinks('/trend', sel, { axis: axis === 'cm' ? null : axis })} />
         <p>연간 매출·이익률 흐름과 전월 대비 변동 요인을 확인합니다. 당월은 월말 예상, 이전 월은 마감 실적입니다.</p>
       </div>
-      <TrendView key={axis} data={data} axes={AXES} />
+      <TrendView key={`${axis}-${sel.ym}`} data={data} axes={AXES} ym={sel.today ? sel.ym : null} />
     </div>
   );
 }

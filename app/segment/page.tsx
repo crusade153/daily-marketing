@@ -1,6 +1,8 @@
 import Notices from '@/components/notices';
 import SegmentView from '@/components/segment-view';
+import MonthStepper from '@/components/month-stepper';
 import { getDashboard, getSegment } from '@/lib/data';
+import { monthLinks, selectMonth } from '@/lib/month';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,13 +11,15 @@ export default async function SegmentPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const { ch } = await searchParams;
+  const { ch, ym } = await searchParams;
   const channel = typeof ch === 'string' && ch ? ch : null;
-  const [d, s] = await Promise.all([getDashboard(), getSegment(channel)]);
+  const sel = selectMonth(ym);
+  const [d, s] = await Promise.all([getDashboard(sel.today), getSegment(channel, sel.today)]);
   return (
     <div className="space-y-4">
       <div className="page-intro">
         <h1>ABCD 등급관리</h1>
+        <MonthStepper {...monthLinks('/segment', sel, { ch: channel })} />
         <p>CM · PM · 제품 · 채널로 범위를 좁혀 제품이 A~D 중 어느 등급에 놓이는지 확인합니다. 기준 지표와 기준선을 바꿔 등급을 시뮬레이션하고, 주요 품목 리스트로 매출·이익을 이끄는 제품을 추립니다.</p>
         <details className="method-note">
           <summary>등급 및 주요 품목 기준</summary>
@@ -27,7 +31,7 @@ export default async function SegmentPage({
         </details>
       </div>
       <Notices d={d} />
-      <SegmentView key={channel ?? 'all'} products={s.products} periods={s.periods} channels={s.channels} channel={s.channel} />
+      <SegmentView key={`${channel ?? 'all'}-${sel.ym}`} products={s.products} periods={s.periods} channels={s.channels} channel={s.channel} monthYm={sel.today ? sel.ym : null} />
     </div>
   );
 }
