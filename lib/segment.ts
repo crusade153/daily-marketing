@@ -1,6 +1,6 @@
 // 세그먼트(ABCD 매트릭스)·파레토 순수 계산.
 //   점 = 제품 또는 선택한 범위의 하위 묶음(CM › PM). X·Y 지표와 기준선을 바꿔 가며 A~D를 나눈다.
-//   A = X↑·Y↑, B = X↓·Y↑, C = X↑·Y↓, D = X↓·Y↓  (기준선 이상이면 ↑)
+//   A = X↑·Y↑, B = X↑·Y↓, C = X↓·Y↑, D = X↓·Y↓  (기준선 이상이면 ↑) — Y가 손익이면 A·C는 손익+, B·D는 손익−
 //   기준선은 선택 범위 안의 점들로 다시 계산한다 → 범위를 좁히면 같은 제품도 등급이 바뀔 수 있다.
 //   파레토: 양(+)의 값만 큰 순으로 누적. 누적 80%까지 '핵심', 95%까지 '중요', 나머지 '일반', 0 이하는 '손실·없음'.
 import { metrics } from './pnl.ts';
@@ -50,6 +50,40 @@ export interface Cut {
 
 export type Quadrant = 'A' | 'B' | 'C' | 'D';
 export const QUADRANTS: Quadrant[] = ['A', 'B', 'C', 'D'];
+
+/** 등급 이름 (2026-11-01 사용자 정의). X = 규모, Y = 손익 기준 */
+export const GRADE_NAME: Record<Quadrant, string> = {
+  A: '핵심품목',
+  B: '수익개선품목',
+  C: '육성품목',
+  D: '지속여부 검토 품목',
+};
+/** 등급별로 할 일 */
+export const GRADE_ACTION: Record<Quadrant, string> = {
+  A: '공급·가격 유지',
+  B: '원가·판가·장려금 점검',
+  C: '판매처·물량 확대',
+  D: '단종·정리 검토',
+};
+/** 좋은 순서 = 신호등 순서: 손익이 먼저 — A(초록) > C(노랑) > B(주황) > D(빨강) */
+export const GRADE_RANK: Record<Quadrant, number> = { A: 3, C: 2, B: 1, D: 0 };
+export const GRADE_ORDER: Quadrant[] = ['A', 'C', 'B', 'D'];
+const profitable = (q: Quadrant) => q === 'A' || q === 'C';
+
+/** 두 기간 등급 비교. new = 이전 기간 실적 없음, gone = 이후 기간 실적 없음 */
+export type Trend = 'down' | 'up' | 'same' | 'new' | 'gone';
+export function gradeTrend(from: Quadrant | null, to: Quadrant | null): Trend | null {
+  if (!from) return to ? 'new' : null;
+  if (!to) return 'gone';
+  const d = GRADE_RANK[to] - GRADE_RANK[from];
+  return d < 0 ? 'down' : d > 0 ? 'up' : 'same';
+}
+/** 등급 이동의 성격: 손익 부호가 바뀌었는지, 규모만 바뀌었는지 */
+export function shiftLabel(from: Quadrant, to: Quadrant): string | null {
+  if (from === to) return null;
+  if (profitable(from) !== profitable(to)) return profitable(to) ? '흑자 전환' : '적자 전환';
+  return (from === 'A' || from === 'B') ? '규모 축소' : '규모 확대';
+}
 
 /** 범위 선택 단계: CM › PM (제품은 검색, 채널은 서버 필터) */
 export type Level = 'cm' | 'owner';
@@ -174,7 +208,7 @@ export function cutValue(units: SegUnit[], period: SegPeriod, metric: SegMetric,
 export function quadrantOf(x: number, y: number, cx: number, cy: number): Quadrant {
   const hx = x >= cx;
   const hy = y >= cy;
-  return hx ? (hy ? 'A' : 'C') : hy ? 'B' : 'D';
+  return hx ? (hy ? 'A' : 'B') : hy ? 'C' : 'D';
 }
 
 /** 그 기간에 매출·수량·원가가 하나라도 있는 점 (실적 없는 제품은 매트릭스·파레토에서 뺀다) */

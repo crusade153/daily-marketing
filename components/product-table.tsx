@@ -2,17 +2,22 @@
 
 import { useMemo, useState } from 'react';
 import { growth, mil, pct, tone, won } from '@/lib/format';
+import { changeOf, gradeChanges, gradePair, type GradeChange } from '@/lib/grade';
 import { metrics, unitPrice, type Metrics } from '@/lib/pnl';
-import { monthLabel } from '@/lib/period';
+import { monthLabel, shiftYm } from '@/lib/period';
+import { GRADE_RANK } from '@/lib/segment';
 import { SCENARIO_LABEL, type MaterialRow, type Scenario } from '@/lib/types';
+import GradeAlert from './grade-alert';
+import { GradeShift } from './grade-chip';
 
 const PAGE = 200;
-const KEY_COLS = new Set(['matnr', 'name', 'cm', 'owner', 'l1', 'qty', 'price', 'sales', 'gp', 'gpm', 'growth', 'pprice', 'pchg']);
+const KEY_COLS = new Set(['matnr', 'name', 'grade', 'cm', 'owner', 'l1', 'qty', 'price', 'sales', 'gp', 'gpm', 'op', 'growth', 'pprice', 'pchg']);
 const TEXT_COLS = ['matnr', 'name', 'cm', 'owner', 'category', 'l1'];
 const MOBILE_SORTS = [
   { id: 'sales', label: '매출순' },
   { id: 'gp', label: 'GP순' },
   { id: 'op', label: 'OP순' },
+  { id: 'grade', label: '등급 악화순' },
   { id: 'growth', label: '매출 증감순' },
   { id: 'price', label: '판매단가순' },
 ];
@@ -23,6 +28,7 @@ interface Ctx {
   p: Metrics;
   price: number | null;
   prevPrice: number | null;
+  grade: ReturnType<typeof changeOf>;
 }
 
 interface Col {
@@ -41,6 +47,14 @@ const priceChg = (c: Ctx) => (c.price != null && c.prevPrice ? c.price / c.prevP
 const COLS: Col[] = [
   { id: 'matnr', label: '제품코드', sort: (r) => r.matnr, cell: (r) => r.matnr },
   { id: 'name', label: '제품명', sort: (r) => r.name, cell: (r) => r.name },
+  {
+    id: 'grade',
+    label: '등급',
+    title: 'ABCD 등급 전월 → 당월 (순매출 5천만원 × 영업이익 0 기준). 오름차순 = 악화 큰 순',
+    // 등급 차이(올라가면 +). 신규·판매 없음은 맨 뒤
+    sort: (_, c) => (c.grade?.from && c.grade.to ? GRADE_RANK[c.grade.to] - GRADE_RANK[c.grade.from] : null),
+    cell: (_, c) => (c.grade ? <GradeShift from={c.grade.from} to={c.grade.to} trend={c.grade.trend} compact /> : '-'),
+  },
   { id: 'cm', label: 'CM', sort: (r) => r.cm, cell: (r) => r.cm },
   { id: 'owner', label: 'PM', sort: (r) => r.owner, cell: (r) => r.owner },
   { id: 'category', label: '제품라인', sort: (r) => r.category, cell: (r) => r.category },
@@ -112,6 +126,15 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
   // 고른 기간의 '전월': 누계·예상은 전월 실적, 전월 실적 보기는 전전월 실적
   const base = scenario === 'prev' ? 'prev2' : 'prev';
   const cols = COLS.filter((c) => detail || KEY_COLS.has(c.id));
+  const pair = gradePair(scenario);
+  const changes = useMemo(() => gradeChanges(rows, false, pair.from, pair.to), [rows, pair.from, pair.to]);
+  const [picked, setPicked] = useState<string | null>(null);
+  const pick = (c: GradeChange | null) => {
+    setPicked(c?.key ?? null);
+    setQuery(c?.matnr ?? '');
+    setL1('');
+    setLimit(PAGE);
+  };
 
   const l1s = useMemo(() => {
     const m = new Map<string, { label: string; sales: number }>();
@@ -130,7 +153,13 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
       .filter((r) => !l1 || r.l1 === l1)
       .filter((r) => !q || [r.matnr, r.name, r.l1t, r.cm, r.owner, r.category].some((v) => v.toLowerCase().includes(q)))
       .map((r) => {
-        const ctx: Ctx = { m: metrics(r[scenario]), p: metrics(r[base]), price: unitPrice(r[scenario]), prevPrice: unitPrice(r[base]) };
+        const ctx: Ctx = {
+          m: metrics(r[scenario]),
+          p: metrics(r[base]),
+          price: unitPrice(r[scenario]),
+          prevPrice: unitPrice(r[base]),
+          grade: changeOf(r[pair.from], r[pair.to]),
+        };
         return { r, ctx, key: col.sort(r, ctx) };
       });
     const dir = sort.desc ? -1 : 1;
@@ -142,7 +171,7 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
       return ((a.key as number) - (b.key as number)) * dir;
     });
     return withCtx;
-  }, [rows, l1, query, scenario, base, sort]);
+  }, [rows, l1, query, scenario, base, sort, pair.from, pair.to]);
 
   const total = useMemo(() => {
     const t = { sales: 0, cogs: 0, incentive: 0, general: 0, qty: 0 };
@@ -157,7 +186,8 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
   }, [list, scenario]);
 
   const onSort = (id: string) => {
-    setSort((s) => (s.id === id ? { id, desc: !s.desc } : { id, desc: !TEXT_COLS.includes(id) }));
+    // 등급은 악화 큰 순(오름차순)부터
+    setSort((s) => (s.id === id ? { id, desc: !s.desc } : { id, desc: !TEXT_COLS.includes(id) && id !== 'grade' }));
     setLimit(PAGE);
   };
   const label = (s: Scenario) => `${monthLabel(s === 'prev' ? prevYm : curYm)} ${SCENARIO_LABEL[s].split(' ')[1]}`;
@@ -167,7 +197,11 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
     inc: mil(total.incentive), gen: mil(total.general), op: mil(total.op), opm: pct(total.opm),
   };
 
+  const periodName = (p: 'prev2' | Scenario) => (p === 'prev2' ? `${monthLabel(shiftYm(prevYm, -1))} 실적` : label(p));
+
   return (
+    <>
+    <GradeAlert changes={changes} fromLabel={periodName(pair.from)} toLabel={periodName(pair.to)} unitLabel="제품" picked={picked} onPick={pick} />
     <div className="card">
       <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 text-sm">
         <div className="flex overflow-hidden rounded-md border border-border">
@@ -205,6 +239,7 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
+            setPicked(null);
             setLimit(PAGE);
           }}
           placeholder="제품코드·제품명·CM·PM 검색"
@@ -216,7 +251,7 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
           aria-label="정렬"
           value={sort.id}
           onChange={(e) => {
-            setSort({ id: e.target.value, desc: true });
+            setSort({ id: e.target.value, desc: e.target.value !== 'grade' });
             setLimit(PAGE);
           }}
         >
@@ -257,7 +292,7 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
             {list.slice(0, limit).map(({ r, ctx }) => (
               <tr key={r.matnr}>
                 {cols.map((c, i) => {
-                  const text = !c.num;
+                  const text = !c.num && c.id !== 'grade';
                   return (
                     <td
                       key={c.id}
@@ -300,6 +335,12 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
                 {r.costMethod === 'rate' && <span className="m-tag">원가 대체</span>}
               </div>
               <p className="m-sub">{r.matnr} · {r.l1t} · CM {r.cm} · PM {r.owner}</p>
+              {ctx.grade && ctx.grade.trend !== 'same' && (
+                <p className="m-grade">
+                  등급 <GradeShift from={ctx.grade.from} to={ctx.grade.to} trend={ctx.grade.trend} />
+                  {ctx.grade.shift && <span> · {ctx.grade.shift}</span>}
+                </p>
+              )}
               <dl className="m-metrics">
                 <div><dt>매출</dt><dd className="font-semibold">{mil(ctx.m.sales)}</dd><dd className={`m-delta ${tone(chg)}`}>{pct(chg)}</dd></div>
                 <div><dt>GP</dt><dd>{mil(ctx.m.gp)} <small className={tone(ctx.m.gpm)}>{pct(ctx.m.gpm)}</small></dd></div>
@@ -317,5 +358,6 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
         )}
       </ul>
     </div>
+    </>
   );
 }

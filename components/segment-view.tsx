@@ -18,9 +18,14 @@ import {
   ZAxis,
 } from 'recharts';
 import { eok, mil, pct } from '@/lib/format';
+import { GRADE_NET_CUT } from '@/lib/grade';
 import {
   BAND_LABEL,
   BASE_OF,
+  GRADE_NAME,
+  GRADE_RANK,
+  gradeTrend,
+  shiftLabel,
   inScope,
   isRateMetric,
   LEVEL_LABEL,
@@ -38,8 +43,11 @@ import {
   type Quadrant,
   type SegMetric,
   type SegPeriod,
+  type SegPoint,
   type SegProduct,
+  type Trend,
 } from '@/lib/segment';
+import { GradeChip, GradeShift } from './grade-chip';
 
 export interface SegmentPeriodMeta {
   id: SegPeriod;
@@ -49,18 +57,40 @@ export interface SegmentPeriodMeta {
   compareOnly?: boolean;
 }
 
-// 사분면 이름은 X = 규모, Y = 수익 기준. 다른 지표를 고르면 부제(↑·↓)로 읽는다
+// 사분면 이름은 X = 규모, Y = 손익 기준 (A·C 손익+, B·D 손익−). 다른 지표를 고르면 부제(↑·↓)로 읽는다
+// 색은 신호등 순서 A 초록 > C 노랑 > B 주황 > D 빨강
 const Q_META: Record<Quadrant, { name: string; color: string; hx: boolean; hy: boolean }> = {
-  A: { name: '핵심 전략', color: 'var(--seg-a)', hx: true, hy: true },
-  B: { name: '수익 강소', color: 'var(--seg-b)', hx: false, hy: true },
-  C: { name: '수익 개선', color: 'var(--seg-c)', hx: true, hy: false },
-  D: { name: '재검토', color: 'var(--seg-d)', hx: false, hy: false },
+  A: { name: GRADE_NAME.A, color: 'var(--seg-a)', hx: true, hy: true },
+  B: { name: GRADE_NAME.B, color: 'var(--seg-b)', hx: true, hy: false },
+  C: { name: GRADE_NAME.C, color: 'var(--seg-c)', hx: false, hy: true },
+  D: { name: GRADE_NAME.D, color: 'var(--seg-d)', hx: false, hy: false },
 };
+
+/** 등급 변동 상세 필터: null 전체 · 'AB' 칸 · 'A*' 전월 A · '*B' 당월 B · 변화 종류 */
+type MoveFilter = string | null;
+const TREND_ORDER: Record<Trend, number> = { down: 0, up: 1, new: 2, gone: 3, same: 4 };
+const TREND_CHIPS: { id: Trend; label: string }[] = [
+  { id: 'down', label: '▼ 악화' },
+  { id: 'up', label: '▲ 개선' },
+  { id: 'same', label: '유지' },
+  { id: 'new', label: '신규' },
+  { id: 'gone', label: '판매 없음' },
+];
+const HIST: SegPeriod[] = ['prev2', 'prev', 'fcst'];
+/** 분석 기간 버튼 순서: 고른 달 예상 → 전월 실적 → 올해 누계 */
+const PERIOD_ORDER: SegPeriod[] = ['fcst', 'prev', 'ytd'];
+interface MoveRow {
+  key: string;
+  unit: SegPoint['unit'];
+  before: SegPoint | null;
+  after: SegPoint | null;
+  trend: Trend;
+}
 
 const METRICS: SegMetric[] = ['net', 'sales', 'qty', 'gp', 'op', 'gpm', 'opm', 'growth'];
 const PARETO_METRICS: SegMetric[] = ['net', 'sales', 'qty', 'gp', 'op'];
 /** 순매출·총매출 X축 기본 기준 금액, 바 상한 (그 이상은 숫자로 입력) */
-const AMOUNT_CUT = 5e7;
+const AMOUNT_CUT = GRADE_NET_CUT;
 const AMOUNT_BAR_MAX = 1e9;
 const AMOUNT_BAR_STEP = 1e7;
 const isSalesMetric = (m: SegMetric) => m === 'net' || m === 'sales';
@@ -305,7 +335,8 @@ export default function SegmentView({
 }) {
   const router = useRouter();
   const [chPending, startCh] = useTransition();
-  const [period, setPeriod] = useState<SegPeriod>('ytd');
+  // 기본은 위 ‹ › 에서 고른 달의 예상 (누계는 따로 골라야 한다 — 2026-11-01 사용자 피드백)
+  const [period, setPeriod] = useState<SegPeriod>('fcst');
   const [productQ, setProductQ] = useState('');
   const [path, setPath] = useState<string[]>([]);
   const [byChild, setByChild] = useState(false);
@@ -317,7 +348,12 @@ export default function SegmentView({
   const [pm, setPm] = useState<SegMetric>('net');
   const [focusQ, setFocusQ] = useState<Quadrant | null>(null);
   const [cmp, setCmp] = useState<'fcst' | 'prev'>('fcst');
-  const [move, setMove] = useState<string | null>(null); // 등급 변동 칸 (null = A 이탈 전체)
+  const [move, setMoveRaw] = useState<MoveFilter>(null); // 등급 변동 상세 필터 (null = 전체 품목)
+  const [moveLimit, setMoveLimit] = useState(PAGE);
+  const setMove = (v: MoveFilter | ((m: MoveFilter) => MoveFilter)) => {
+    setMoveRaw(v);
+    setMoveLimit(PAGE);
+  };
   const [band, setBand] = useState<ParetoBand | ''>('');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
@@ -368,16 +404,52 @@ export default function SegmentView({
   const segFrom = useMemo(() => segment(units, cmpFrom, xm, ym, xc, yc), [units, cmpFrom, xm, ym, xc, yc]);
   const segTo = useMemo(() => segment(units, cmp, xm, ym, xc, yc), [units, cmp, xm, ym, xc, yc]);
   const moves = useMemo(() => (segFrom && segTo ? migration(segFrom, segTo) : null), [segFrom, segTo]);
-  const moveRows = useMemo(() => {
-    if (!moves || !segFrom || !segTo) return [];
-    const cells = move ? [move] : ['AB', 'AC', 'AD'];
+  // 등급 히스토리: 전전월 · 전월 · 당월을 같은 기준으로 다시 나눈 등급
+  const histPeriods = useMemo(() => HIST.filter((id) => periods.some((p) => p.id === id)), [periods]);
+  const hist = useMemo(
+    () => new Map(histPeriods.map((id) => [id, new Map((segment(units, id, xm, ym, xc, yc)?.points ?? []).map((p) => [p.unit.key, p.q]))])),
+    [histPeriods, units, xm, ym, xc, yc],
+  );
+  // 모든 품목의 변동: 악화 → 개선 → 신규 → 판매 없음 → 유지 순, 악화·개선은 Y 변화가 큰 순
+  const allMoves = useMemo((): MoveRow[] => {
+    if (!segFrom || !segTo) return [];
     const from = new Map(segFrom.points.map((p) => [p.unit.key, p]));
     const to = new Map(segTo.points.map((p) => [p.unit.key, p]));
-    return cells
-      .flatMap((k) => moves.get(k) ?? [])
-      .map((key) => ({ before: from.get(key)!, after: to.get(key)! }))
-      .sort((a, b) => b.before.x - a.before.x);
-  }, [moves, segFrom, segTo, move]);
+    const rows: MoveRow[] = [];
+    for (const key of new Set([...from.keys(), ...to.keys()])) {
+      const before = from.get(key) ?? null;
+      const after = to.get(key) ?? null;
+      const trend = gradeTrend(before?.q ?? null, after?.q ?? null);
+      if (trend) rows.push({ key, unit: (after ?? before)!.unit, before, after, trend });
+    }
+    const dy = (r: MoveRow) => (r.after?.y ?? 0) - (r.before?.y ?? 0);
+    const size = (r: MoveRow) => r.after?.x ?? r.before?.x ?? 0;
+    return rows.sort(
+      (a, b) =>
+        TREND_ORDER[a.trend] - TREND_ORDER[b.trend] ||
+        (a.trend === 'down' ? dy(a) - dy(b) : a.trend === 'up' ? dy(b) - dy(a) : size(b) - size(a)),
+    );
+  }, [segFrom, segTo]);
+  const trendCount = useMemo(() => {
+    const c: Record<Trend, number> = { down: 0, up: 0, same: 0, new: 0, gone: 0 };
+    for (const r of allMoves) c[r.trend] += 1;
+    return c;
+  }, [allMoves]);
+  const moveRows = useMemo(() => {
+    if (!move) return allMoves;
+    if (move in TREND_ORDER) return allMoves.filter((r) => r.trend === move);
+    const [f, t] = move;
+    return allMoves.filter((r) => r.before && r.after && (f === '*' || r.before.q === f) && (t === '*' || r.after.q === t));
+  }, [allMoves, move]);
+  const moveLabel = !move
+    ? '전체'
+    : move in TREND_ORDER
+      ? TREND_CHIPS.find((c) => c.id === move)!.label
+      : move[0] === '*'
+        ? `당월 ${move[1]}`
+        : move[1] === '*'
+          ? `전월 ${move[0]}`
+          : `${move[0]} → ${move[1]}`;
   const par = useMemo(() => pareto(units, period, pm), [units, period, pm]);
   const ptOf = useMemo(() => new Map(seg?.points.map((p) => [p.unit.key, p]) ?? []), [seg]);
 
@@ -502,14 +574,20 @@ export default function SegmentView({
       {/* ── 조건 ── */}
       <div className="card seg-controls">
         <div className="seg-row">
-          <div className="segmented" role="group" aria-label="분석 기간">
-            {periods.filter((p) => !p.compareOnly).map((p) => (
+          <span className="seg-row-title">분석 기간</span>
+          <div className="segmented seg-period-pick" role="group" aria-label="분석 기간 (매트릭스·등급 요약·등급 변동 모두)">
+            {PERIOD_ORDER.flatMap((id) => periods.filter((p) => p.id === id && !p.compareOnly)).map((p) => (
               <button
                 key={p.id}
                 type="button"
                 aria-pressed={period === p.id}
                 onClick={() => {
                   setPeriod(p.id);
+                  // 월 기간을 고르면 등급 변동도 그 달 기준으로 맞춘다
+                  if (p.id === 'fcst' || p.id === 'prev') {
+                    setCmp(p.id);
+                    setMove(null);
+                  }
                   resetFilters();
                 }}
               >
@@ -609,7 +687,7 @@ export default function SegmentView({
             <div>
               <h2 id="seg-matrix-title">ABCD 등급 분포</h2>
               <p>
-                {meta.label} · {scopeLabel} · {unitName} {summary.n.toLocaleString()}개 · X {xLabel} / Y {yLabel}
+                <b className="seg-period-badge">{meta.label}</b> {scopeLabel} · {unitName} {summary.n.toLocaleString()}개 · X {xLabel} / Y {yLabel}
               </p>
             </div>
             <span className="unit-label">점을 누르면 리스트에서 강조</span>
@@ -734,7 +812,7 @@ export default function SegmentView({
                 <button
                   key={q}
                   type="button"
-                  className="card seg-quad"
+                  className={`card seg-quad g-${q}`}
                   aria-pressed={focusQ === q}
                   onClick={() => {
                     setFocusQ((f) => (f === q ? null : q));
@@ -742,8 +820,7 @@ export default function SegmentView({
                   }}
                 >
                   <span className="seg-quad-head">
-                    <i style={{ background: m.color }} aria-hidden="true" />
-                    <b>{q}</b> {m.name}
+                    <GradeChip q={q} /> {m.name}
                   </span>
                   <span className="seg-quad-sub">
                     {xLabel}
@@ -773,12 +850,28 @@ export default function SegmentView({
             <div className="panel-heading">
               <div>
                 <h2 id="seg-move-title">등급 변동</h2>
-                <p>같은 기준으로 두 달을 다시 등급 분류 · 칸을 누르면 아래 상세</p>
+                <p>
+                  전월 등급(행) → 당월 등급(열) · 칸·합계를 누르면 아래 상세
+                  {period === 'ytd' && <span className="seg-move-ytd"> · 누계에는 월 비교가 없어 아래에서 고른 두 달로 봅니다</span>}
+                </p>
               </div>
             </div>
             <div className="segmented seg-move-pick" role="group" aria-label="등급 변동 비교 기간">
               {(['fcst', 'prev'] as const).map((id) => (
-                <button key={id} type="button" aria-pressed={cmp === id} onClick={() => { setCmp(id); setMove(null); }}>
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={cmp === id}
+                  onClick={() => {
+                    setCmp(id);
+                    setMove(null);
+                    // 누계를 보는 중이 아니면 위 분석 기간도 같은 달로 맞춘다
+                    if (period !== 'ytd') {
+                      setPeriod(id);
+                      resetFilters();
+                    }
+                  }}
+                >
                   {periodLabel(BASE_OF[id] as SegPeriod)} → {periodLabel(id)}
                 </button>
               ))}
@@ -788,47 +881,80 @@ export default function SegmentView({
                 <table className="seg-move-table">
                   <thead>
                     <tr>
-                      <th scope="col">이전＼이후</th>
+                      <th scope="col" className="seg-move-corner" title={`전월 = ${periodLabel(cmpFrom)}, 당월 = ${periodLabel(cmp)}`}>
+                        전월＼당월
+                      </th>
                       {QUADRANTS.map((q) => (
-                        <th key={q} scope="col">{q}</th>
+                        <th key={q} scope="col">
+                          <button type="button" className="seg-move-axis" aria-pressed={move === `*${q}`} onClick={() => setMove((m) => (m === `*${q}` ? null : `*${q}`))} title={`당월 ${q} ${GRADE_NAME[q]} 전체`}>
+                            <GradeChip q={q} />
+                          </button>
+                        </th>
                       ))}
+                      <th scope="col" className="seg-move-sum">전월 계</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {QUADRANTS.map((from) => (
-                      <tr key={from}>
-                        <th scope="row">{from}</th>
-                        {QUADRANTS.map((to) => {
-                          const k = `${from}${to}`;
-                          const n = moves.get(k)?.length ?? 0;
-                          return (
-                            <td key={to} className={from === to ? 'is-stay' : ''}>
-                              <button
-                                type="button"
-                                disabled={!n}
-                                aria-pressed={move === k}
-                                title={`${from} → ${to}: ${n}개`}
-                                onClick={() => setMove((m) => (m === k ? null : k))}
-                              >
-                                {n || '·'}
-                              </button>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
+                    {QUADRANTS.map((from) => {
+                      const rowSum = QUADRANTS.reduce((t, to) => t + (moves.get(`${from}${to}`)?.length ?? 0), 0);
+                      return (
+                        <tr key={from}>
+                          <th scope="row">
+                            <button type="button" className="seg-move-axis" aria-pressed={move === `${from}*`} onClick={() => setMove((m) => (m === `${from}*` ? null : `${from}*`))} title={`전월 ${from} ${GRADE_NAME[from]} 전체`}>
+                              <GradeChip q={from} />
+                            </button>
+                          </th>
+                          {QUADRANTS.map((to) => {
+                            const k = `${from}${to}`;
+                            const n = moves.get(k)?.length ?? 0;
+                            const d = GRADE_RANK[to] - GRADE_RANK[from];
+                            return (
+                              <td key={to} className={d === 0 ? 'is-stay' : d < 0 ? 'is-down' : 'is-up'}>
+                                <button
+                                  type="button"
+                                  disabled={!n}
+                                  aria-pressed={move === k}
+                                  title={`${from} → ${to}: ${n}개${d < 0 ? ' (악화)' : d > 0 ? ' (개선)' : ''}`}
+                                  onClick={() => setMove((m) => (m === k ? null : k))}
+                                >
+                                  {n || '·'}
+                                </button>
+                              </td>
+                            );
+                          })}
+                          <td className="is-sum">
+                            <button type="button" disabled={!rowSum} aria-pressed={move === `${from}*`} onClick={() => setMove((m) => (m === `${from}*` ? null : `${from}*`))}>
+                              {rowSum}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="seg-move-total">
+                      <th scope="row">당월 계</th>
+                      {QUADRANTS.map((to) => {
+                        const colSum = QUADRANTS.reduce((t, from) => t + (moves.get(`${from}${to}`)?.length ?? 0), 0);
+                        return (
+                          <td key={to} className="is-sum">
+                            <button type="button" disabled={!colSum} aria-pressed={move === `*${to}`} onClick={() => setMove((m) => (m === `*${to}` ? null : `*${to}`))}>
+                              {colSum}
+                            </button>
+                          </td>
+                        );
+                      })}
+                      <td className="is-sum is-grand">
+                        <button type="button" aria-pressed={move === null} onClick={() => setMove(null)} title="전체 품목">
+                          {trendCount.down + trendCount.up + trendCount.same}
+                        </button>
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
                 <p className="seg-move-foot">
-                  {(() => {
-                    let stay = 0;
-                    let moved = 0;
-                    for (const [k, v] of moves) {
-                      if (k[0] === k[1]) stay += v.length;
-                      else moved += v.length;
-                    }
-                    return `유지 ${stay}개 · 이동 ${moved}개`;
-                  })()}
+                  <span className="text-neg">▼ 악화 {trendCount.down}</span> · <span className="text-pos">▲ 개선 {trendCount.up}</span> · 유지 {trendCount.same}
+                  {trendCount.new + trendCount.gone > 0 && ` · 신규 ${trendCount.new} · 판매 없음 ${trendCount.gone} (표 밖)`}
+                  <br />
+                  전월 {periodLabel(cmpFrom)} · 당월 {periodLabel(cmp)} · 빨간 칸 = 악화, 초록 칸 = 개선 (A &gt; C &gt; B &gt; D)
                 </p>
               </>
             ) : (
@@ -838,59 +964,89 @@ export default function SegmentView({
         </aside>
       </div>
 
-      {/* ── 등급 변동 상세 ── */}
+      {/* ── 등급 변동 상세: 모든 품목의 등급 히스토리 ── */}
       <section className="card seg-list" aria-labelledby="seg-moves-title">
         <div className="seg-list-head">
           <h2 id="seg-moves-title">등급 변동 상세</h2>
           <span className="text-muted">
-            {periodLabel(cmpFrom)} → {periodLabel(cmp)} · {move ? `${move[0]} → ${move[1]}` : 'A에서 B·C·D로 내려간'} {unitName} {moveRows.length.toLocaleString()}개
+            {periodLabel(cmpFrom)} → {periodLabel(cmp)} · {moveLabel} {unitName} {moveRows.length.toLocaleString()}개
           </span>
-          {move && (
-            <button type="button" className="seg-link" onClick={() => setMove(null)}>
-              A 이탈 전체 보기
+          <div className="seg-trend-chips" role="group" aria-label="변화 종류로 거르기">
+            <button type="button" aria-pressed={move === null} onClick={() => setMove(null)}>
+              전체 <b className="num">{allMoves.length.toLocaleString()}</b>
             </button>
-          )}
+            {TREND_CHIPS.map((c) => (
+              <button key={c.id} type="button" className={`t-${c.id}`} aria-pressed={move === c.id} disabled={!trendCount[c.id]} onClick={() => setMove((m) => (m === c.id ? null : c.id))}>
+                {c.label} <b className="num">{trendCount[c.id].toLocaleString()}</b>
+              </button>
+            ))}
+          </div>
         </div>
         <div className="seg-list-scroll seg-moves-scroll">
-          <table className="dtable seg-dtable">
+          <table className="dtable seg-dtable seg-moves-table">
             <thead>
               <tr>
                 <th className="text-left">{unitName}</th>
-                <th>등급 변화</th>
-                <th className="num">{xLabel} {periodLabel(cmpFrom)}</th>
-                <th className="num">{xLabel} {periodLabel(cmp)}</th>
-                <th className="num">{yLabel} {periodLabel(cmpFrom)}</th>
-                <th className="num">{yLabel} {periodLabel(cmp)}</th>
+                <th className="text-left">등급 변화</th>
+                <th className="text-left" title="같은 기준으로 다시 나눈 월별 등급">히스토리 ({histPeriods.map((id) => periodLabel(id).split(' ')[0]).join(' · ')})</th>
+                <th className="num">{xLabel} 전월</th>
+                <th className="num">{xLabel} 당월</th>
+                <th className="num">{yLabel} 전월</th>
+                <th className="num">{yLabel} 당월</th>
+                <th className="num">{yLabel} 증감</th>
               </tr>
             </thead>
             <tbody>
-              {moveRows.map(({ before, after }) => (
-                <tr
-                  key={after.unit.key}
-                  className={selected === after.unit.key ? 'is-selected' : ''}
-                  onClick={() => setSelected((s) => (s === after.unit.key ? null : after.unit.key))}
-                >
-                  <td className="seg-name" title={`${after.unit.code} ${after.unit.label}`}>
-                    <span>{after.unit.label}</span>
-                    <small>{after.unit.code}{after.unit.count > 1 ? ` · 제품 ${after.unit.count}개` : ''}</small>
-                  </td>
-                  <td>
-                    <span className="seg-badge"><i style={{ background: Q_META[before.q].color }} />{before.q}</span>
-                    {' → '}
-                    <span className="seg-badge"><i style={{ background: Q_META[after.q].color }} />{after.q} {Q_META[after.q].name}</span>
-                  </td>
-                  <td className="num">{fmtVal(xm, before.x)}</td>
-                  <td className="num font-semibold">{fmtVal(xm, after.x)}</td>
-                  <td className={`num ${before.y < 0 ? 'text-neg' : ''}`}>{fmtVal(ym, before.y)}</td>
-                  <td className={`num font-semibold ${after.y < 0 ? 'text-neg' : ''}`}>{fmtVal(ym, after.y)}</td>
-                </tr>
-              ))}
+              {moveRows.slice(0, moveLimit).map(({ key, unit: u, before, after, trend }) => {
+                const shift = before && after ? shiftLabel(before.q, after.q) : null;
+                const dy = before && after ? after.y - before.y : null;
+                return (
+                  <tr key={key} className={`mv-${trend} ${selected === key ? 'is-selected' : ''}`} onClick={() => setSelected((s) => (s === key ? null : key))}>
+                    <td className="seg-name" title={`${u.code} ${u.label}`}>
+                      <span>{u.label}</span>
+                      <small>{u.code}{u.count > 1 ? ` · 제품 ${u.count}개` : ''}</small>
+                    </td>
+                    <td>
+                      <GradeShift from={before?.q ?? null} to={after?.q ?? null} trend={trend} />
+                      {shift && <small className={`mv-shift ${shift === '적자 전환' ? 'is-alarm' : shift === '흑자 전환' ? 'is-good' : ''}`}>{shift}</small>}
+                    </td>
+                    <td>
+                      <span className="mv-hist">
+                        {histPeriods.map((id, i) => {
+                          const q = hist.get(id)?.get(key) ?? null;
+                          const on = id === cmpFrom || id === cmp;
+                          return (
+                            <span key={id} className={on ? '' : 'is-off'}>
+                              {i > 0 && <i aria-hidden="true">›</i>}
+                              <GradeChip q={q} faded={!on} />
+                            </span>
+                          );
+                        })}
+                      </span>
+                    </td>
+                    <td className="num text-muted">{fmtVal(xm, before?.x)}</td>
+                    <td className="num font-semibold">{fmtVal(xm, after?.x)}</td>
+                    <td className={`num text-muted ${before && before.y < 0 ? 'text-neg' : ''}`}>{fmtVal(ym, before?.y)}</td>
+                    <td className={`num font-semibold ${after && after.y < 0 ? 'text-neg' : ''}`}>{fmtVal(ym, after?.y)}</td>
+                    <td className={`num ${dy == null || dy === 0 ? 'text-muted' : dy < 0 ? 'text-neg' : 'text-pos'}`}>
+                      {dy == null ? '-' : `${dy > 0 ? '+' : ''}${fmtVal(ym, dy)}`}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+          {moveRows.length > moveLimit && (
+            <div className="border-t border-border p-3 text-center">
+              <button type="button" onClick={() => setMoveLimit((n) => n + PAGE)} className="rounded-md px-4 py-1.5 text-sm font-semibold text-accent hover:bg-accent-soft">
+                {Math.min(PAGE, moveRows.length - moveLimit)}개 더 보기 (남은 {(moveRows.length - moveLimit).toLocaleString()}개)
+              </button>
+            </div>
+          )}
           {!moveRows.length && <p className="seg-empty">해당하는 {unitName}이 없습니다.</p>}
         </div>
         <p className="seg-list-foot">
-          금액 백만원 · 기준선은 각 달 안에서 다시 계산(기준 금액·0 기준은 그대로) · {periodLabel(cmpFrom)} 기준 {xLabel} 큰 순
+          금액 백만원 · 전월 {periodLabel(cmpFrom)}, 당월 {periodLabel(cmp)} · 악화(빨강) → 개선(초록) → 신규 → 판매 없음 → 유지(흐리게) 순, 악화·개선은 {yLabel} 변화가 큰 순 · 기준선은 각 달 안에서 다시 계산(기준 금액·0 기준은 그대로)
         </p>
       </section>
 

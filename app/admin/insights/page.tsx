@@ -2,7 +2,8 @@ import { redirect } from 'next/navigation';
 import InsightLab from '@/components/insight-lab';
 import MonthStepper from '@/components/month-stepper';
 import { getInsights } from '@/lib/data';
-import { monthLinks, selectMonth } from '@/lib/month';
+import { monthLinks } from '@/lib/month';
+import { pageMonth } from '@/lib/month-server';
 import { getSession } from '@/lib/session';
 import { findUser } from '@/lib/users';
 
@@ -17,7 +18,7 @@ export default async function InsightsPage({
   const session = await getSession();
   const me = session && (await findUser(session.id));
   if (me?.role !== 'ADMIN') redirect('/');
-  const sel = selectMonth((await searchParams).ym);
+  const sel = await pageMonth((await searchParams).ym);
   const data = await getInsights(sel.today);
   return (
     <div className="il-page">

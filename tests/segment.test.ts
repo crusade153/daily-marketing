@@ -33,8 +33,8 @@ test('파레토 기준선: 큰 순 누적이 처음 80%에 닿는 값', () => {
 
 test('사분면: 기준선 이상이 ↑', () => {
   assert.equal(quadrantOf(10, 10, 5, 5), 'A');
-  assert.equal(quadrantOf(1, 10, 5, 5), 'B');
-  assert.equal(quadrantOf(10, 1, 5, 5), 'C');
+  assert.equal(quadrantOf(1, 10, 5, 5), 'C');
+  assert.equal(quadrantOf(10, 1, 5, 5), 'B');
   assert.equal(quadrantOf(5, 5, 5, 5), 'A');
   assert.equal(quadrantOf(1, 1, 5, 5), 'D');
 });
@@ -45,14 +45,14 @@ test('매출 파레토 × 영업이익 0 기준 세그먼트, 실적 없는 제�
   assert.equal(seg.cx, 250);
   assert.equal(seg.cy, 0);
   const q = Object.fromEntries(seg.points.map((p) => [p.unit.key, p.q]));
-  assert.deepEqual(q, { m1: 'A', m2: 'C', m3: 'B', m4: 'D' });
+  assert.deepEqual(q, { m1: 'A', m2: 'B', m3: 'C', m4: 'D' });
 });
 
 test('계층 범위를 좁히면 기준선이 그 안에서 다시 계산된다', () => {
   const units = toUnits(inScope(products, ['B']), 'product');
   const seg = segment(units, 'fcst', 'sales', 'op', cut('median'), cut('zero'))!;
   assert.equal(seg.cx, 75); // B 안의 m3·m4 중앙값
-  assert.deepEqual(seg.points.map((p) => p.q), ['A', 'D']); // 전체 기준이면 B였던 m3이 A가 된다
+  assert.deepEqual(seg.points.map((p) => p.q), ['A', 'D']); // 전체 기준이면 C였던 m3이 A가 된다
 });
 
 test('하위 계층 묶음과 비율 지표의 가중평균 기준선', () => {
@@ -77,7 +77,7 @@ test('순매출 = 총매출 − 장려금, 기준 금액 이상이 ↑', () => {
   assert.equal(unitValue(units[0], 'fcst', 'net'), 550); // 600 − 50
   assert.equal(unitValue(units[1], 'fcst', 'net'), 250); // 판관비 미입력이면 총매출과 같다
   const seg = segment(units, 'fcst', 'net', 'op', cut('manual', { manual: 250 }), cut('zero'))!;
-  assert.deepEqual(Object.fromEntries(seg.points.map((p) => [p.unit.key, p.q])), { m1: 'A', m2: 'C', m3: 'B', m4: 'D' });
+  assert.deepEqual(Object.fromEntries(seg.points.map((p) => [p.unit.key, p.q])), { m1: 'A', m2: 'B', m3: 'C', m4: 'D' });
 });
 
 test('기간 간 세그먼트 이동', () => {
@@ -85,6 +85,6 @@ test('기간 간 세그먼트 이동', () => {
   const before = segment(units, 'prev', 'sales', 'op', cut('manual', { manual: 200 }), cut('zero'))!;
   const after = segment(units, 'fcst', 'sales', 'op', cut('manual', { manual: 200 }), cut('zero'))!;
   const cells = migration(before, after);
-  // m1 A→A, m2 A→C, m4 B→D (m3은 전월 실적 없음, m5는 이번 기간 실적 없음)
-  assert.deepEqual(Object.fromEntries(cells), { AA: ['m1'], AC: ['m2'], BD: ['m4'] });
+  // m1 A→A, m2 A→B, m4 C→D (m3은 전월 실적 없음, m5는 이번 기간 실적 없음)
+  assert.deepEqual(Object.fromEntries(cells), { AA: ['m1'], AB: ['m2'], CD: ['m4'] });
 });

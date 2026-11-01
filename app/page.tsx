@@ -6,7 +6,8 @@ import CategoryOverview from '@/components/category-overview';
 import PnlStatement from '@/components/pnl-statement';
 import PriceTrend from '@/components/price-trend';
 import { getDashboard, getPriceTrend } from '@/lib/data';
-import { monthLinks, selectMonth } from '@/lib/month';
+import { monthLinks } from '@/lib/month';
+import { pageMonth } from '@/lib/month-server';
 import { groupBy, metrics, sortGroups, totalOf, type Axis } from '@/lib/pnl';
 
 export const dynamic = 'force-dynamic';
@@ -23,7 +24,7 @@ export default async function SummaryPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
-  const sel = selectMonth((await searchParams).ym);
+  const sel = await pageMonth((await searchParams).ym);
   const [d, price] = await Promise.all([getDashboard(sel.today), getPriceTrend(sel.today)]);
   const total = totalOf(d.rows);
   return (

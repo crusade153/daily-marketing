@@ -1,7 +1,8 @@
 import TrendView from '@/components/trend-view';
 import MonthStepper from '@/components/month-stepper';
 import { getTrend } from '@/lib/data';
-import { monthLinks, selectMonth } from '@/lib/month';
+import { monthLinks } from '@/lib/month';
+import { pageMonth } from '@/lib/month-server';
 import type { Axis } from '@/lib/pnl';
 
 export const dynamic = 'force-dynamic';
@@ -17,7 +18,7 @@ export default async function TrendPage({
 }) {
   const { axis: q, ym } = await searchParams;
   const axis = AXES.find((a) => a === q) ?? 'cm';
-  const sel = selectMonth(ym);
+  const sel = await pageMonth(ym);
   const data = await getTrend(axis, sel.today);
   return (
     <div className="space-y-4">
