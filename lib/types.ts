@@ -162,6 +162,7 @@ export interface MaterialRow extends RowDims {
   mtd: Amounts;
   fcst: Amounts;
   prev: Amounts;
+  prev2: Amounts; // 전전월 실적 — '전월 실적' 보기의 비교 기준
 }
 
 /** 제품별 목표 [매출, GP, OP] */

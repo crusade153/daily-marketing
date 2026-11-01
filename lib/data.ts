@@ -231,10 +231,11 @@ interface ChannelRaw {
 
 const CHANNEL_CHUNK = 6;
 
-/** 채널 실적이 필요한 달: 올해 1월(또는 1월이면 전월 12월) ~ 당월 */
+/** 채널 실적이 필요한 달: 올해 1월(또는 그보다 이르면 전전월) ~ 당월. 전전월은 '전월 실적' 보기의 비교 기준 */
 function channelMonths(p: Periods): string[] {
   const start = yearStartOf(p.curYm);
-  return ymRange(p.prevYm < start ? p.prevYm : start, p.curYm);
+  const prev2 = shiftYm(p.prevYm, -1);
+  return ymRange(prev2 < start ? prev2 : start, p.curYm);
 }
 
 async function queryChannel(p: Periods, part: number): Promise<ChannelRaw> {
@@ -280,7 +281,7 @@ async function queryChannel(p: Periods, part: number): Promise<ChannelRaw> {
   return raw;
 }
 
-const cachedChannel = unstable_cache(async (today: string, part: number) => queryChannel(getPeriods(today), part), ['copa-channel-v2'], {
+const cachedChannel = unstable_cache(async (today: string, part: number) => queryChannel(getPeriods(today), part), ['copa-channel-v3'], {
   revalidate: 3600,
   tags: ['bq'],
 });
@@ -536,17 +537,20 @@ export async function getDashboard(today?: string): Promise<DashboardData> {
 
   const curInputs = inputs.filter((i) => i.ym === p.curYm);
   const prevInputs = inputs.filter((i) => i.ym === p.prevYm);
+  const prev2Ym = shiftYm(p.prevYm, -1);
   const rows = buildRows({
     facts,
     cur: chFacts.get(p.curYm) ?? [],
     prev: chFacts.get(p.prevYm) ?? [],
+    prev2: chFacts.get(prev2Ym) ?? [],
+    prev2Inputs: inputs.filter((i) => i.ym === prev2Ym),
     maps,
     reps,
     curInputs,
     prevInputs,
     elapsed: progress.elapsed,
     daysInMonth: p.daysInMonth,
-  }).filter((r) => r.mtd.sales || r.prev.sales || r.prev.cogs || r.fcst.incentive || r.fcst.general || r.prev.incentive || r.prev.general);
+  }).filter((r) => r.mtd.sales || r.prev.sales || r.prev.cogs || r.fcst.incentive || r.fcst.general || r.prev.incentive || r.prev.general || r.prev2.sales || r.prev2.cogs);
 
   const coverage = { unitSales: 0, rateSales: 0, noneSales: 0 };
   for (const r of rows) {

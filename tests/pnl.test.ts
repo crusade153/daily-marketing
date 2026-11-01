@@ -218,16 +218,19 @@ test('마감월: 제품 × 채널 실적 + 그 달 채널 입력 배부, 매출 
 });
 
 test('동일제품 단가 변동률: 전월 수량 고정, 0.2~5배 밖·한쪽만 있는 제품 제외', () => {
-  const r = (matnr: string, cur: [number, number], prev: [number, number]) => ({
+  const r = (matnr: string, cur: [number, number], prev: [number, number], prev2: [number, number] = [0, 0]) => ({
     matnr,
     mtd: { sales: cur[0], qty: cur[1], cogs: 0, incentive: 0, general: 0 },
     fcst: { sales: cur[0], qty: cur[1], cogs: 0, incentive: 0, general: 0 },
     prev: { sales: prev[0], qty: prev[1], cogs: 0, incentive: 0, general: 0 },
+    prev2: { sales: prev2[0], qty: prev2[1], cogs: 0, incentive: 0, general: 0 },
   });
   const rows = [r('x', [1100, 100], [1000, 100]), r('y', [3000, 30], [1000, 10]), r('n', [500, 5], [0, 0]), r('z', [1000, 10], [100, 10])];
   // (11×100 + 100×10) / (10×100 + 100×10) − 1 = 5%
   assert.ok(Math.abs(priceChange(rows, 'fcst')! - 0.05) < 1e-12);
-  assert.equal(priceChange(rows, 'prev'), null);
+  assert.equal(priceChange(rows, 'prev'), null); // 전전월이 없으면 비교 불가
+  // 전월 실적 보기는 전전월과 비교: 1000/100 vs 800/100 → +25%
+  assert.ok(Math.abs(priceChange([r('x', [0, 0], [1000, 100], [800, 100])], 'prev')! - 0.25) < 1e-12);
   // 같은 제품이 채널로 나뉘어 있어도 제품 단위로 합쳐 비교
   const split = [r('x', [550, 50], [500, 50]), r('x', [550, 50], [500, 50])];
   assert.ok(Math.abs(priceChange(split, 'mtd')! - 0.1) < 1e-12);

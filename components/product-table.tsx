@@ -30,7 +30,7 @@ interface Col {
   label: string;
   title?: string;
   num?: boolean;
-  compare?: boolean; // 전월 비교 열 (전월 실적 보기에서는 숨김)
+  compare?: boolean; // 전월 비교 열 (전월 실적 보기는 전전월과 비교)
   sort: (r: MaterialRow, c: Ctx) => number | string | null;
   cell: (r: MaterialRow, c: Ctx) => React.ReactNode;
   className?: (r: MaterialRow, c: Ctx) => string;
@@ -109,8 +109,9 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
   const [limit, setLimit] = useState(PAGE);
   const [detail, setDetail] = useState(false);
 
-  const compare = scenario !== 'prev';
-  const cols = COLS.filter((c) => (compare || !c.compare) && (detail || KEY_COLS.has(c.id)));
+  // 고른 기간의 '전월': 누계·예상은 전월 실적, 전월 실적 보기는 전전월 실적
+  const base = scenario === 'prev' ? 'prev2' : 'prev';
+  const cols = COLS.filter((c) => detail || KEY_COLS.has(c.id));
 
   const l1s = useMemo(() => {
     const m = new Map<string, { label: string; sales: number }>();
@@ -129,7 +130,7 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
       .filter((r) => !l1 || r.l1 === l1)
       .filter((r) => !q || [r.matnr, r.name, r.l1t, r.cm, r.owner, r.category].some((v) => v.toLowerCase().includes(q)))
       .map((r) => {
-        const ctx: Ctx = { m: metrics(r[scenario]), p: metrics(r.prev), price: unitPrice(r[scenario]), prevPrice: unitPrice(r.prev) };
+        const ctx: Ctx = { m: metrics(r[scenario]), p: metrics(r[base]), price: unitPrice(r[scenario]), prevPrice: unitPrice(r[base]) };
         return { r, ctx, key: col.sort(r, ctx) };
       });
     const dir = sort.desc ? -1 : 1;
@@ -141,7 +142,7 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
       return ((a.key as number) - (b.key as number)) * dir;
     });
     return withCtx;
-  }, [rows, l1, query, scenario, sort]);
+  }, [rows, l1, query, scenario, base, sort]);
 
   const total = useMemo(() => {
     const t = { sales: 0, cogs: 0, incentive: 0, general: 0, qty: 0 };
@@ -300,9 +301,9 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
               </div>
               <p className="m-sub">{r.matnr} · {r.l1t} · CM {r.cm} · PM {r.owner}</p>
               <dl className="m-metrics">
-                <div><dt>매출</dt><dd className="font-semibold">{mil(ctx.m.sales)}</dd>{compare && <dd className={`m-delta ${tone(chg)}`}>{pct(chg)}</dd>}</div>
+                <div><dt>매출</dt><dd className="font-semibold">{mil(ctx.m.sales)}</dd><dd className={`m-delta ${tone(chg)}`}>{pct(chg)}</dd></div>
                 <div><dt>GP</dt><dd>{mil(ctx.m.gp)} <small className={tone(ctx.m.gpm)}>{pct(ctx.m.gpm)}</small></dd></div>
-                <div><dt>단가(원)</dt><dd>{ctx.price == null ? '-' : won(ctx.price)}</dd>{compare && <dd className={`m-delta ${tone(priceChg(ctx))}`}>{pct(priceChg(ctx))}</dd>}</div>
+                <div><dt>단가(원)</dt><dd>{ctx.price == null ? '-' : won(ctx.price)}</dd><dd className={`m-delta ${tone(priceChg(ctx))}`}>{pct(priceChg(ctx))}</dd></div>
               </dl>
             </li>
           );

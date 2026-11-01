@@ -79,15 +79,16 @@ const PRICE_RATIO_MAX = 5;
  * 동일제품 단가 변동률 (전월 수량 고정, 라스파이레스). 묶음의 평균단가는 제품 구성에 따라 흔들리므로
  * 같은 제품끼리 전월 대비 단가만 비교한다. 비교할 제품이 없으면 null
  */
-export function priceChange(rows: Pick<MaterialRow, 'matnr' | 'mtd' | 'fcst' | 'prev'>[], s: Scenario): number | null {
-  if (s === 'prev') return null;
+export function priceChange(rows: Pick<MaterialRow, 'matnr' | 'mtd' | 'fcst' | 'prev' | 'prev2'>[], s: Scenario): number | null {
+  // 전월 실적 보기는 전전월과 비교한다
+  const base = s === 'prev' ? 'prev2' : 'prev';
   const by = new Map<string, { cs: number; cq: number; ps: number; pq: number }>();
   for (const r of rows) {
     const v = by.get(r.matnr) ?? { cs: 0, cq: 0, ps: 0, pq: 0 };
     v.cs += r[s].sales;
     v.cq += r[s].qty;
-    v.ps += r.prev.sales;
-    v.pq += r.prev.qty;
+    v.ps += r[base].sales;
+    v.pq += r[base].qty;
     by.set(r.matnr, v);
   }
   let num = 0;
@@ -366,17 +367,19 @@ const rowKey = (matnr: string, ch: string) => `${matnr}|${ch}`;
 export function buildRows(params: {
   /** 제품 단위: 계층·3개월 원가 이력 */
   facts: MaterialFact[];
-  /** 제품 × 채널: 당월 누계, 전월 실적 */
+  /** 제품 × 채널: 당월 누계, 전월 실적, 전전월 실적 (전월 실적 보기의 비교 기준) */
   cur: ChannelFact[];
   prev: ChannelFact[];
+  prev2?: ChannelFact[];
   maps: ProductMap[];
   reps: Map<string, string>;
   curInputs: ChannelInput[];
   prevInputs: ChannelInput[];
+  prev2Inputs?: ChannelInput[];
   elapsed: number;
   daysInMonth: number;
 }): MaterialRow[] {
-  const { facts, cur, prev, maps, reps, curInputs, prevInputs, elapsed, daysInMonth } = params;
+  const { facts, cur, prev, prev2 = [], maps, reps, curInputs, prevInputs, prev2Inputs = [], elapsed, daysInMonth } = params;
   const mapBy = new Map(maps.map((m) => [m.matnr, m]));
   const factBy = new Map(facts.map((f) => [f.matnr, f]));
   const rates = costRates(facts);
@@ -390,7 +393,7 @@ export function buildRows(params: {
     if (!r) {
       const f = factBy.get(c.matnr);
       const dims = f ?? { matnr: c.matnr, name: c.matnr, ...UNKNOWN_HIER };
-      r = { ...dimsOf(dims, mapBy.get(c.matnr), c, reps), costMethod: 'none', mtd: { ...ZERO }, fcst: { ...ZERO }, prev: { ...ZERO } };
+      r = { ...dimsOf(dims, mapBy.get(c.matnr), c, reps), costMethod: 'none', mtd: { ...ZERO }, fcst: { ...ZERO }, prev: { ...ZERO }, prev2: { ...ZERO } };
       byKey.set(key, r);
     }
     return r;
@@ -407,10 +410,15 @@ export function buildRows(params: {
     r.prev = { ...ZERO, sales: c.sales, qty: c.qty, cogs: c.cogs };
     if (r.costMethod === 'none' && !r.mtd.sales) r.costMethod = 'unit'; // 전월만 있는 행은 실제원가
   }
+  for (const c of prev2) {
+    const r = at(c);
+    r.prev2 = { ...ZERO, sales: c.sales, qty: c.qty, cogs: c.cogs };
+    if (r.costMethod === 'none' && !r.mtd.sales) r.costMethod = 'unit';
+  }
   const rows = [...byKey.values()];
 
   const extra = new Map<string, MaterialRow>();
-  const make = (d: RowDims): MaterialRow => ({ ...d, costMethod: 'unit', mtd: { ...ZERO }, fcst: { ...ZERO }, prev: { ...ZERO } });
+  const make = (d: RowDims): MaterialRow => ({ ...d, costMethod: 'unit', mtd: { ...ZERO }, fcst: { ...ZERO }, prev: { ...ZERO }, prev2: { ...ZERO } });
   spreadChannelInputs(
     rows,
     curInputs,
@@ -439,6 +447,21 @@ export function buildRows(params: {
     },
     (r, rate) => {
       r.prev.general += r.prev.sales * rate;
+    },
+    extra,
+    make,
+    reps,
+  );
+  spreadChannelInputs(
+    rows,
+    prev2Inputs,
+    (r) => r.prev2.sales,
+    (r, inc, gen) => {
+      r.prev2.incentive += inc;
+      r.prev2.general += gen;
+    },
+    (r, rate) => {
+      r.prev2.general += r.prev2.sales * rate;
     },
     extra,
     make,
@@ -488,12 +511,13 @@ export function byProduct(rows: MaterialRow[]): MaterialRow[] {
   for (const r of rows) {
     const p = map.get(r.matnr);
     if (!p) {
-      map.set(r.matnr, { ...r, ch: '*', cht: '전체', rep: '-', mtd: { ...r.mtd }, fcst: { ...r.fcst }, prev: { ...r.prev } });
+      map.set(r.matnr, { ...r, ch: '*', cht: '전체', rep: '-', mtd: { ...r.mtd }, fcst: { ...r.fcst }, prev: { ...r.prev }, prev2: { ...r.prev2 } });
       continue;
     }
     p.mtd = addAmounts(p.mtd, r.mtd);
     p.fcst = addAmounts(p.fcst, r.fcst);
     p.prev = addAmounts(p.prev, r.prev);
+    p.prev2 = addAmounts(p.prev2, r.prev2);
     if (p.costMethod === 'unit' && r.costMethod !== 'unit') p.costMethod = r.costMethod;
   }
   return [...map.values()];
@@ -544,6 +568,7 @@ export interface Group {
   mtd: Amounts;
   fcst: Amounts;
   prev: Amounts;
+  prev2: Amounts;
   rows: MaterialRow[];
 }
 
@@ -557,11 +582,13 @@ export function groupBy(rows: MaterialRow[], axis: Axis): Group[] {
       mtd: { ...ZERO },
       fcst: { ...ZERO },
       prev: { ...ZERO },
+      prev2: { ...ZERO },
       rows: [],
     };
     g.mtd = addAmounts(g.mtd, r.mtd);
     g.fcst = addAmounts(g.fcst, r.fcst);
     g.prev = addAmounts(g.prev, r.prev);
+    g.prev2 = addAmounts(g.prev2, r.prev2);
     g.rows.push(r);
     map.set(key, g);
   }
@@ -575,9 +602,9 @@ export function sortGroups<G extends { label: string; rows: { cmMark: string }[]
   return groups.sort((a, b) => rank(a) - rank(b) || sales(b) - sales(a));
 }
 
-export function totalOf(rows: MaterialRow[]): { mtd: Amounts; fcst: Amounts; prev: Amounts } {
+export function totalOf(rows: MaterialRow[]): { mtd: Amounts; fcst: Amounts; prev: Amounts; prev2: Amounts } {
   return rows.reduce(
-    (t, r) => ({ mtd: addAmounts(t.mtd, r.mtd), fcst: addAmounts(t.fcst, r.fcst), prev: addAmounts(t.prev, r.prev) }),
-    { mtd: { ...ZERO }, fcst: { ...ZERO }, prev: { ...ZERO } },
+    (t, r) => ({ mtd: addAmounts(t.mtd, r.mtd), fcst: addAmounts(t.fcst, r.fcst), prev: addAmounts(t.prev, r.prev), prev2: addAmounts(t.prev2, r.prev2) }),
+    { mtd: { ...ZERO }, fcst: { ...ZERO }, prev: { ...ZERO }, prev2: { ...ZERO } },
   );
 }

@@ -60,7 +60,6 @@ interface Col {
   label: string;
   title?: string;
   detail?: boolean; // '전체 지표'에서만
-  compare?: boolean; // 전월 비교 (전월 실적 보기에서는 숨김)
   target?: boolean; // 목표 (제품별 모드만)
   cell: (c: Ctx) => { v: React.ReactNode; cls?: string };
 }
@@ -76,11 +75,10 @@ const priceCols: Col[] = [
     id: 'pchg',
     group: '판가 (원/EA)',
     label: '증감',
-    compare: true,
     title: '제품: 전월 대비 단가 증감 · 묶음: 동일제품 단가 변동률(전월 수량 고정)',
     cell: (c) => ({ v: pct(c.priceChg), cls: tone(c.priceChg) }),
   },
-  { id: 'pprice', group: '판가 (원/EA)', label: '전월 판가', detail: true, compare: true, cell: (c) => ({ v: c.prevPrice == null ? '-' : won(c.prevPrice), cls: 'text-muted' }) },
+  { id: 'pprice', group: '판가 (원/EA)', label: '전월 판가', detail: true, cell: (c) => ({ v: c.prevPrice == null ? '-' : won(c.prevPrice), cls: 'text-muted' }) },
 ];
 
 const COLS: Record<PivotMode, Col[]> = {
@@ -88,38 +86,38 @@ const COLS: Record<PivotMode, Col[]> = {
     { id: 'tsales', group: '매출', label: '목표', target: true, cell: (c) => ({ v: c.t ? mil(c.t[0]) : '-', cls: 'text-muted' }) },
     { id: 'sales', group: '매출', label: '실적', cell: (c) => ({ v: mil(c.m.sales), cls: 'font-semibold' }) },
     { id: 'asales', group: '매출', label: '목표비', target: true, cell: (c) => achCell(c.m.sales, c.t?.[0]) },
-    { id: 'psales', group: '매출', label: '전월', title: '전월 실적 (원가 결산 전이면 추정 원가)', compare: true, cell: (c) => ({ v: mil(c.p.sales), cls: 'text-muted' }) },
-    { id: 'growth', group: '매출', label: '전월비', compare: true, cell: (c) => ({ v: c.p.sales > 0 ? pct(growth(c.m.sales, c.p.sales)) : '-', cls: tone(c.m.sales - c.p.sales) }) },
+    { id: 'psales', group: '매출', label: '전월', title: '전월 실적 (원가 결산 전이면 추정 원가)', cell: (c) => ({ v: mil(c.p.sales), cls: 'text-muted' }) },
+    { id: 'growth', group: '매출', label: '전월비', cell: (c) => ({ v: c.p.sales > 0 ? pct(growth(c.m.sales, c.p.sales)) : '-', cls: tone(c.m.sales - c.p.sales) }) },
     { id: 'inc', group: '매출총이익 (GP)', label: '장려금', detail: true, cell: (c) => ({ v: mil(c.m.incentive) }) },
     { id: 'net', group: '매출총이익 (GP)', label: '순매출', detail: true, cell: (c) => ({ v: mil(c.m.net) }) },
     { id: 'cogs', group: '매출총이익 (GP)', label: '매출원가', detail: true, cell: (c) => ({ v: mil(c.m.cogs) }) },
     { id: 'tgp', group: '매출총이익 (GP)', label: '목표', target: true, cell: (c) => ({ v: c.t ? mil(c.t[1]) : '-', cls: 'text-muted' }) },
     { id: 'gp', group: '매출총이익 (GP)', label: '실적', cell: (c) => ({ v: mil(c.m.gp), cls: `font-semibold ${tone(c.m.gp)}` }) },
     { id: 'agp', group: '매출총이익 (GP)', label: '목표비', target: true, cell: (c) => achCell(c.m.gp, c.t?.[1]) },
-    { id: 'pgp', group: '매출총이익 (GP)', label: '전월', title: '전월 실적 (원가 결산 전이면 추정 원가)', compare: true, cell: (c) => ({ v: mil(c.p.gp), cls: 'text-muted' }) },
+    { id: 'pgp', group: '매출총이익 (GP)', label: '전월', title: '전월 실적 (원가 결산 전이면 추정 원가)', cell: (c) => ({ v: mil(c.p.gp), cls: 'text-muted' }) },
     { id: 'gpm', group: '매출총이익 (GP)', label: 'GP율', cell: (c) => ({ v: pct(c.m.gpm), cls: tone(c.m.gpm) }) },
-    { id: 'gpd', group: '매출총이익 (GP)', label: '전월비', title: 'GP율 전월 대비 (%p)', detail: true, compare: true, cell: (c) => ({ v: ppt(c.m.gpm, c.p.gpm), cls: tone((c.m.gpm ?? 0) - (c.p.gpm ?? 0)) }) },
+    { id: 'gpd', group: '매출총이익 (GP)', label: '전월비', title: 'GP율 전월 대비 (%p)', detail: true, cell: (c) => ({ v: ppt(c.m.gpm, c.p.gpm), cls: tone((c.m.gpm ?? 0) - (c.p.gpm ?? 0)) }) },
     { id: 'gen', group: '영업이익 (OP)', label: '일반비', detail: true, cell: (c) => ({ v: mil(c.m.general) }) },
     { id: 'top', group: '영업이익 (OP)', label: '목표', target: true, cell: (c) => ({ v: c.t ? mil(c.t[2]) : '-', cls: 'text-muted' }) },
     { id: 'op', group: '영업이익 (OP)', label: '실적', cell: (c) => ({ v: mil(c.m.op), cls: `font-semibold ${tone(c.m.op)}` }) },
     { id: 'aop', group: '영업이익 (OP)', label: '목표비', target: true, cell: (c) => achCell(c.m.op, c.t?.[2]) },
-    { id: 'pop', group: '영업이익 (OP)', label: '전월', title: '전월 실적 (원가 결산 전이면 추정 원가)', compare: true, cell: (c) => ({ v: mil(c.p.op), cls: 'text-muted' }) },
+    { id: 'pop', group: '영업이익 (OP)', label: '전월', title: '전월 실적 (원가 결산 전이면 추정 원가)', cell: (c) => ({ v: mil(c.p.op), cls: 'text-muted' }) },
     { id: 'opm', group: '영업이익 (OP)', label: 'OP율', cell: (c) => ({ v: pct(c.m.opm), cls: tone(c.m.opm) }) },
-    { id: 'opd', group: '영업이익 (OP)', label: '전월비', title: 'OP율 전월 대비 (%p)', detail: true, compare: true, cell: (c) => ({ v: ppt(c.m.opm, c.p.opm), cls: tone((c.m.opm ?? 0) - (c.p.opm ?? 0)) }) },
+    { id: 'opd', group: '영업이익 (OP)', label: '전월비', title: 'OP율 전월 대비 (%p)', detail: true, cell: (c) => ({ v: ppt(c.m.opm, c.p.opm), cls: tone((c.m.opm ?? 0) - (c.p.opm ?? 0)) }) },
     ...priceCols,
   ],
   // 채널별: 매출총이익(GP)까지만 (사용자 요청)
   channel: [
     { id: 'sales', group: '매출', label: '실적', cell: (c) => ({ v: mil(c.m.sales), cls: 'font-semibold' }) },
-    { id: 'psales', group: '매출', label: '전월', title: '전월 실적 (원가 결산 전이면 추정 원가)', compare: true, cell: (c) => ({ v: mil(c.p.sales), cls: 'text-muted' }) },
-    { id: 'growth', group: '매출', label: '전월비', compare: true, cell: (c) => ({ v: c.p.sales > 0 ? pct(growth(c.m.sales, c.p.sales)) : '-', cls: tone(c.m.sales - c.p.sales) }) },
+    { id: 'psales', group: '매출', label: '전월', title: '전월 실적 (원가 결산 전이면 추정 원가)', cell: (c) => ({ v: mil(c.p.sales), cls: 'text-muted' }) },
+    { id: 'growth', group: '매출', label: '전월비', cell: (c) => ({ v: c.p.sales > 0 ? pct(growth(c.m.sales, c.p.sales)) : '-', cls: tone(c.m.sales - c.p.sales) }) },
     { id: 'inc', group: '장려금 · 순매출', label: '장려금', cell: (c) => ({ v: mil(c.m.incentive) }) },
     { id: 'net', group: '장려금 · 순매출', label: '순매출', cell: (c) => ({ v: mil(c.m.net) }) },
     { id: 'cogs', group: '매출총이익 (GP)', label: '매출원가', detail: true, cell: (c) => ({ v: mil(c.m.cogs) }) },
     { id: 'gp', group: '매출총이익 (GP)', label: '실적', cell: (c) => ({ v: mil(c.m.gp), cls: `font-semibold ${tone(c.m.gp)}` }) },
-    { id: 'pgp', group: '매출총이익 (GP)', label: '전월', title: '전월 실적 (원가 결산 전이면 추정 원가)', compare: true, cell: (c) => ({ v: mil(c.p.gp), cls: 'text-muted' }) },
+    { id: 'pgp', group: '매출총이익 (GP)', label: '전월', title: '전월 실적 (원가 결산 전이면 추정 원가)', cell: (c) => ({ v: mil(c.p.gp), cls: 'text-muted' }) },
     { id: 'gpm', group: '매출총이익 (GP)', label: 'GP율', cell: (c) => ({ v: pct(c.m.gpm), cls: tone(c.m.gpm) }) },
-    { id: 'gpd', group: '매출총이익 (GP)', label: '전월비', title: 'GP율 전월 대비 (%p)', compare: true, cell: (c) => ({ v: ppt(c.m.gpm, c.p.gpm), cls: tone((c.m.gpm ?? 0) - (c.p.gpm ?? 0)) }) },
+    { id: 'gpd', group: '매출총이익 (GP)', label: '전월비', title: 'GP율 전월 대비 (%p)', cell: (c) => ({ v: ppt(c.m.gpm, c.p.gpm), cls: tone((c.m.gpm ?? 0) - (c.p.gpm ?? 0)) }) },
     ...priceCols,
   ],
 };
@@ -173,8 +171,9 @@ export default function PnlPivot({
     return rows.filter((r) => [r.name, r.matnr, r.l1t, r.cm, r.category, r.owner, r.cht, r.rep].some((v) => v.toLowerCase().includes(q)));
   }, [rows, query]);
 
-  const compare = scenario !== 'prev';
-  const cols = COLS[mode].filter((c) => (detail || !c.detail) && (compare || !c.compare) && (!c.target || targets));
+  // 고른 기간의 '전월': 누계·예상은 전월 실적, 전월 실적 보기는 전전월 실적
+  const base = scenario === 'prev' ? 'prev2' : 'prev';
+  const cols = COLS[mode].filter((c) => (detail || !c.detail) && (!c.target || targets));
   const groups = cols.reduce<{ name: string; span: number }[]>((acc, c) => {
     const last = acc.at(-1);
     if (last?.name === c.group) last.span += 1;
@@ -203,13 +202,13 @@ export default function PnlPivot({
     }
     return any ? t : null;
   };
-  const ctxOf = (g: Pick<Group, 'mtd' | 'fcst' | 'prev' | 'rows'>, channelSplit: boolean): Ctx => {
+  const ctxOf = (g: Pick<Group, 'mtd' | 'fcst' | 'prev' | 'prev2' | 'rows'>, channelSplit: boolean): Ctx => {
     const single = g.rows.length > 0 && g.rows.every((r) => r.matnr === g.rows[0].matnr);
     const price = single ? unitPrice(g[scenario]) : null;
-    const prevPrice = single ? unitPrice(g.prev) : null;
+    const prevPrice = single ? unitPrice(g[base]) : null;
     return {
       m: metrics(g[scenario]),
-      p: metrics(g.prev),
+      p: metrics(g[base]),
       t: targetOf(g.rows, channelSplit),
       price,
       prevPrice,
@@ -333,7 +332,7 @@ export default function PnlPivot({
 
   /** 모바일 카드 지표: 매출 · GP · OP(채널별은 순매출) + 판가 줄 */
   const mobileMetrics = (c: Ctx) => {
-    const salesSub = c.t ? `목표비 ${pct(ach(c.m.sales, c.t[0]))}` : compare && c.p.sales > 0 ? pct(growth(c.m.sales, c.p.sales)) : '';
+    const salesSub = c.t ? `목표비 ${pct(ach(c.m.sales, c.t[0]))}` : c.p.sales > 0 ? pct(growth(c.m.sales, c.p.sales)) : '';
     const salesTone = c.t ? tone((ach(c.m.sales, c.t[0]) ?? 1) - 1) : tone(c.m.sales - c.p.sales);
     return (
       <>
@@ -353,20 +352,20 @@ export default function PnlPivot({
           <div>
             <dt>GP</dt>
             <dd className={tone(c.m.gp)}>{mil(c.m.gp)} <small className={tone(c.m.gpm)}>{pct(c.m.gpm)}</small></dd>
-            {c.t ? <dd className="m-delta text-muted">목표비 {pct(ach(c.m.gp, c.t[1]))}</dd> : compare && <dd className={`m-delta ${tone((c.m.gpm ?? 0) - (c.p.gpm ?? 0))}`}>{ppt(c.m.gpm, c.p.gpm)}</dd>}
+            {c.t ? <dd className="m-delta text-muted">목표비 {pct(ach(c.m.gp, c.t[1]))}</dd> : <dd className={`m-delta ${tone((c.m.gpm ?? 0) - (c.p.gpm ?? 0))}`}>{ppt(c.m.gpm, c.p.gpm)}</dd>}
           </div>
           {mode === 'product' && (
             <div>
               <dt>OP</dt>
               <dd className={tone(c.m.op)}>{mil(c.m.op)} <small className={tone(c.m.opm)}>{pct(c.m.opm)}</small></dd>
-              {c.t ? <dd className="m-delta text-muted">목표비 {pct(ach(c.m.op, c.t[2]))}</dd> : compare && <dd className={`m-delta ${tone((c.m.opm ?? 0) - (c.p.opm ?? 0))}`}>{ppt(c.m.opm, c.p.opm)}</dd>}
+              {c.t ? <dd className="m-delta text-muted">목표비 {pct(ach(c.m.op, c.t[2]))}</dd> : <dd className={`m-delta ${tone((c.m.opm ?? 0) - (c.p.opm ?? 0))}`}>{ppt(c.m.opm, c.p.opm)}</dd>}
             </div>
           )}
         </dl>
         {(c.price != null || c.priceChg != null) && (
           <p className="m-price">
             판가 {c.price != null ? `${won(c.price)}원` : '(묶음)'}
-            {compare && c.priceChg != null && <span className={tone(c.priceChg)}> {c.single ? '전월비' : '동일제품'} {pct(c.priceChg)}</span>}
+            {c.priceChg != null && <span className={tone(c.priceChg)}> {c.single ? '전월비' : '동일제품'} {pct(c.priceChg)}</span>}
           </p>
         )}
       </>
