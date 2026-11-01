@@ -77,6 +77,15 @@ button:disabled { cursor: default; }
 .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .eyebrow { font-size: 12px; color: var(--muted); margin-bottom: 3px; font-weight: 600; }
 .page-heading h1 { font-size: 25px; font-weight: 750; letter-spacing: -1px; line-height: 1.35; }
+.month-stepper { display: inline-flex; align-items: center; gap: 2px; margin-top: 6px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-size: 12px; }
+.month-stepper-label { padding: 0 8px; color: var(--muted); white-space: nowrap; }
+.month-stepper-label b { color: var(--accent); }
+.month-stepper-label i { font-style: normal; margin: 0 2px; }
+.month-step { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; font-size: 17px; line-height: 1; color: var(--text); border-radius: 6px; }
+a.month-step:hover { background: var(--accent-soft); color: var(--accent); }
+.month-step[aria-disabled=true] { color: var(--border); cursor: default; }
+.month-step .is-pending { animation: month-pending 0.8s ease-in-out infinite alternate; }
+@keyframes month-pending { from { opacity: 1; } to { opacity: 0.25; } }
 .period-status { display: flex; align-items: center; gap: 14px; font-size: 12px; }
 .status-dot { height: 6px; width: 6px; border-radius: 50%; background: var(--pos); margin-right: -7px; }
 .period-progress { padding-left: 16px; border-left: 1px solid var(--border); min-width: 180px; }

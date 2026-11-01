@@ -1,13 +1,15 @@
 import { dateLabel, monthLabel, ymLabel } from '@/lib/period';
 import type { DashboardData } from '@/lib/types';
+import MonthStepper from './month-stepper';
 
-export default function PeriodBar({ d }: { d: DashboardData }) {
+export default function PeriodBar({ d, prevHref, nextHref }: { d: DashboardData; prevHref: string | null; nextHref: string | null }) {
   const { elapsed, daysInMonth, rate } = d.progress;
   return (
     <section className="page-heading">
       <div>
         <p className="eyebrow">{ymLabel(d.curYm)}</p>
         <h1>매출·손익 현황</h1>
+        <MonthStepper curYm={d.curYm} prevYm={d.prevYm} prevHref={prevHref} nextHref={nextHref} />
       </div>
       <div className="period-status">
         <span className="status-dot" aria-hidden="true" />

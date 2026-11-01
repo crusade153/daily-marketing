@@ -41,7 +41,7 @@ export function daysIn(ym: string): number {
   return new Date(Number(ym.slice(0, 4)), Number(ym.slice(4, 6)), 0).getDate();
 }
 
-const monthEnd = (ym: string) => `${ym}${String(daysIn(ym)).padStart(2, '0')}`;
+export const monthEnd = (ym: string) => `${ym}${String(daysIn(ym)).padStart(2, '0')}`;
 
 export function getPeriods(today: string = kstToday()): Periods {
   const curYm = today.slice(0, 6);
