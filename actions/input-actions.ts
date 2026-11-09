@@ -76,6 +76,32 @@ export async function saveChannelInputs(input: unknown): Promise<SaveResult> {
   }
 }
 
+const PlanSaveInput = z.object({
+  ym: z.string().regex(/^\d{6}$/),
+  user: z.string().trim().max(40),
+  entries: z
+    .array(z.object({ l3: z.string().min(1).max(30), l3t: z.string().max(120), sales: Amount, qty: z.number().finite().min(-1e12).max(1e12) }))
+    .max(2000),
+});
+
+/** 판매계획 저장: 제품계층 LV3 × 월. (YYYYMM, LV3) 기준 upsert. 금액은 원, 수량은 EA */
+export async function savePlans(input: unknown): Promise<SaveResult> {
+  if (!(await getSession())) return NO_SESSION;
+  const parsed = PlanSaveInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: '입력값 형식이 올바르지 않습니다.' };
+  const { ym, user, entries } = parsed.data;
+  const at = nowKst();
+  try {
+    return await upsert(
+      TABS.plan,
+      entries.map((e) => [ym, e.l3, e.l3t, Math.round(e.sales), Math.round(e.qty), at, user || '-']),
+      (v) => cellKey(v[0], v[1]),
+    );
+  } catch (e) {
+    return fail('savePlans', e);
+  }
+}
+
 const ChannelOwnerInput = z.object({
   user: z.string().trim().max(40),
   entries: z.array(z.object({ ch: z.string().min(1).max(20), cht: z.string().max(80), rep: z.string().trim().max(40) })).max(200),

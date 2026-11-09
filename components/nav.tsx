@@ -12,8 +12,9 @@ const LINKS = [
   { href: '/segment', label: 'ABCD 등급관리' },
   { href: '/hierarchy', label: '제품별 손익 분석' },
   { href: '/channels', label: '채널별 손익 분석' },
+  { href: '/plan', label: '판매계획 대비' },
   { href: '/trend', label: '월별 추이' },
-  { href: '/input', label: '비용·목표 입력' },
+  { href: '/input', label: '비용·계획 입력' },
   { href: '/mapping', label: '제품 매핑' },
 ];
 

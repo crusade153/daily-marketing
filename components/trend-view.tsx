@@ -396,7 +396,7 @@ export default function TrendView({ data, axes, ym = null }: { data: TrendData; 
                       {m.costEst && <span className="ml-0.5 text-[10px] text-neg" title="원가 결산 전이라 3개월 평균 단위원가로 추정한 원가">원가추정</span>}
                       {needsInput(metric) && (
                         <span className={`block text-[10px] font-normal ${m.filled ? '' : 'text-neg'}`}>
-                          {m.ledger ? 'SAP 원장' : m.filled ? `입력 ${m.filled}/${m.chTotal}` : '미입력'}
+                          {m.sga === 'actual' ? '판관비 실적' : m.sga === 'fcst' ? '판관비 예측' : m.ledger ? 'SAP 원장' : m.filled ? `입력 ${m.filled}/${m.chTotal}` : '미입력'}
                         </span>
                       )}
                     </button>
