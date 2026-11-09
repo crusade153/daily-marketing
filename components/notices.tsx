@@ -51,6 +51,13 @@ export default function Notices({ d }: { d: DashboardData }) {
       ))}
     </span>,
   );
+  // 연동 데이터가 비어 있으면 조용히 원장 대체로 넘어가지 않게 드러낸다
+  if (!link.lastYm)
+    items.push(
+      <span key="nolink" className="notice-alert" title="구글 시트 sga_link 탭을 읽지 못했거나 비어 있습니다. scripts/import-sga-link.mts로 다시 올리세요.">
+        <b>판관비 연동 데이터 없음</b> — 장려금·일반비를 SAP 원장으로 대체 중
+      </span>,
+    );
   if (replacement) items.push(<span key="rate">원가율 대체 적용 <b>{pct((rateSales + noneSales) / total)}</b> ({eok(rateSales + noneSales)})</span>);
   if (d.storage === 'local') items.push(<span key="local">입력값은 현재 개발 환경에 저장됩니다.</span>);
   if (needInput)
@@ -62,7 +69,11 @@ export default function Notices({ d }: { d: DashboardData }) {
 
   // 접혀 있을 때 보일 경고: 원가 결산 전, 비용 없는 달
   const missing = months.filter(([, s]) => costMissing(s)).map(([ym]) => monthLabel(ym));
-  const alert = [d.costOpen.length ? `${d.costOpen.map(monthLabel).join('·')} 원가 결산 전` : '', missing.length ? `${missing.join('·')} 장려금·일반비 미입력` : ''].filter(Boolean).join(' · ') || null;
+  const noLink = !link.lastYm;
+  const alert =
+    [noLink ? '판관비 연동 데이터 없음' : '', d.costOpen.length ? `${d.costOpen.map(monthLabel).join('·')} 원가 결산 전` : '', missing.length ? `${missing.join('·')} 장려금·일반비 미입력` : '']
+      .filter(Boolean)
+      .join(' · ') || null;
 
   return (
     <NoticeToggle count={items.length - (needInput ? 1 : 0)} alert={alert}>

@@ -44,6 +44,9 @@ interface Store {
   append(tab: Tab, rows: Cell[][]): Promise<void>;
 }
 
+/** 없는 탭을 다시 확인하기 전 최소 간격 (시트 읽기 한도 분당 60회 보호) */
+const TITLES_TTL = 60_000;
+
 const colLetter = (n: number) => String.fromCharCode(64 + n); // 헤더가 8열 이하라 A~Z면 충분
 
 function sheetsStore(spreadsheetId: string): Store {
@@ -56,7 +59,9 @@ function sheetsStore(spreadsheetId: string): Store {
   const ensured = new Map<string, Promise<void>>();
   const inflight = new Map<string, Promise<SheetRow[]>>();
   let titlesP: Promise<Set<string>> | null = null;
+  let titlesAt = 0;
   const titles = () => {
+    if (!titlesP) titlesAt = Date.now();
     titlesP ??= api.spreadsheets
       .get({ spreadsheetId, fields: 'sheets.properties.title' })
       .then((meta) => new Set((meta.data.sheets ?? []).map((s) => s.properties?.title ?? '')))
@@ -111,7 +116,13 @@ function sheetsStore(spreadsheetId: string): Store {
       let p = inflight.get(tab.name);
       if (!p) {
         p = (async () => {
-          if (!(await titles()).has(tab.name)) return [];
+          let known = await titles();
+          // 목록에 없는 탭은 다른 곳(가져오기 스크립트·다른 인스턴스)에서 나중에 만들었을 수 있다 → 1분이 지났으면 목록을 다시 받는다
+          if (!known.has(tab.name) && Date.now() - titlesAt > TITLES_TTL) {
+            titlesP = null;
+            known = await titles();
+          }
+          if (!known.has(tab.name)) return [];
           const res = await api.spreadsheets.values.get({
             spreadsheetId,
             range: `${tab.name}!A2:${colLetter(tab.header.length)}`,
