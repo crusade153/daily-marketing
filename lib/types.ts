@@ -102,13 +102,16 @@ export interface ChannelOwner {
 }
 
 /**
- * 장려금·일반비 수기 입력: 고객그룹3(채널) × 월.
- * 장려금·일반비 고정비 = 월 전체 금액(원), 그 채널 제품 총매출 비중으로 배부. 변동비율 = 총매출 대비 %
+ * 장려금·일반비 배부 단위 입력: 월 × 고객그룹3(by 'ch', 기본) 또는 영업그룹(by 'sg').
+ * 금액 = 월 전체 금액(원), 그 채널(영업그룹) 제품 총매출 비중으로 배부. 변동비율 = 총매출 대비 % (판관비 연동 전 수기 입력의 흔적, 지금은 0)
+ *   수기 입력: 장려금 = 영업그룹, 일반비 = 고객그룹3 (2026-11-09 사용자 결정)
  */
 export interface ChannelInput {
   ym: string;
-  ch: string; // KVGR3
-  cht: string; // KVGR3_T
+  /** 배부 기준: ch = 고객그룹3, sg = 영업그룹. 없으면 ch */
+  by?: 'ch' | 'sg';
+  ch: string; // by에 따라 KVGR3 또는 VKGRP 코드
+  cht: string; // 그 이름
   incentive: number;
   general: number; // 일반비 고정비 (금액)
   rate: number; // 일반비 변동비율 (%, 예: 3.5 = 총매출의 3.5%)
@@ -116,11 +119,13 @@ export interface ChannelInput {
   updatedBy: string;
 }
 
-/** 제품 × 고객그룹3 한 달 실적 (CO-PA) */
+/** 제품 × 고객그룹3 × 영업그룹 한 달 실적 (CO-PA) */
 export interface ChannelFact {
   matnr: string;
   ch: string;
   cht: string;
+  sg: string; // 영업그룹 VKGRP
+  sgt: string;
   sales: number;
   qty: number;
   cogs: number; // CO-PA 실제원가 (마감월에만 의미)
@@ -147,6 +152,9 @@ export interface RowDims extends Hierarchy {
   owner: string;
   ch: string;
   cht: string;
+  /** 영업그룹 (VKGRP) — 장려금 배부 단위 */
+  sg: string;
+  sgt: string;
   /** 채널 영업담당자 */
   rep: string;
 }
@@ -165,6 +173,18 @@ export interface MaterialRow extends RowDims {
   prev2: Amounts; // 전전월 실적 — '전월 실적' 보기의 비교 기준
 }
 
+/**
+ * 그 달 장려금·일반비 원천: link = 판관비 대시보드 마감 실적, open = 판관비 대시보드 미마감(들어온 만큼),
+ * manual = 수기 입력(장려금 영업그룹·일반비 고객그룹3), ledger = SAP 원장 매출 비중 배부, none = 없음
+ */
+export type CostSource = 'link' | 'open' | 'manual' | 'ledger' | 'none';
+
+export interface MonthInputStatus {
+  source: CostSource;
+  sg: number; // 장려금을 입력한 영업그룹 수
+  ch: number; // 일반비를 입력한 고객그룹3 수
+}
+
 /** 제품별 목표 [매출, GP, OP] */
 export type TargetMap = Record<string, [number, number, number]>;
 
@@ -181,15 +201,12 @@ export interface DashboardData {
   rows: MaterialRow[];
   coverage: { unitSales: number; rateSales: number; noneSales: number };
   /** 비용 입력 현황: 매출 있는 채널 수, 당월·전월 입력한 채널 수 */
-  inputStatus: { chTotal: number; curFilled: number; prevFilled: number };
-  /** 수기 입력이 없어 장려금·일반비를 SAP 원장 실적으로 채운 달 (YYYYMM) */
-  ledgerYms: string[];
-  /** 판관비 대시보드 마감 실적으로 장려금·일반비(= 배부 판관비 전체)를 채운 달 */
-  sgaYms: string[];
-  /** 판관비 대시보드 직전 마감 3개월 채널 비율로 장려금·판관비를 예측한 달 */
-  sgaFcstYms: string[];
+  /** 수기 입력 현황: 매출 있는 고객그룹3·영업그룹 수, 당월·전월 원천과 입력 수 */
+  inputStatus: { chTotal: number; sgTotal: number; cur: MonthInputStatus; prev: MonthInputStatus };
+  /** 달(YYYYMM)마다 장려금·일반비 원천 */
+  costSource: Record<string, CostSource>;
   /** 연동 파일 정보: 만든 시각, 마지막 마감월 (YYYYMM) */
-  sgaLink: { generatedAt: string; lastClosed: string };
+  sgaLink: { generatedAt: string; lastClosed: string; lastYm: string };
   /** 당월·전월 제품 목표 */
   targets: { cur: TargetMap; prev: TargetMap };
   storage: 'sheets' | 'local';

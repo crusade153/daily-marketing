@@ -16,7 +16,7 @@ export default async function PlanPage({
   const { ym } = await searchParams;
   const sel = await pageMonth(ym);
   const [d, plans] = await Promise.all([getDashboard(sel.today), getPlans()]);
-  // 계획 비교에 필요한 값만 넘긴다 (제품 × 채널 행 → 계층·매출·수량)
+  // 계획 비교에 필요한 값만 넘긴다 (제품 × 채널 행 → 계층·매출)
   const rows: PlanSourceRow[] = d.rows
     .filter((r) => r.name !== ORPHAN_NAME)
     .map((r) => ({
@@ -26,9 +26,9 @@ export default async function PlanPage({
       l2t: r.l2t,
       l3: r.l3,
       l3t: r.l3t,
-      mtd: { sales: r.mtd.sales, qty: r.mtd.qty },
-      fcst: { sales: r.fcst.sales, qty: r.fcst.qty },
-      prev: { sales: r.prev.sales, qty: r.prev.qty },
+      mtd: r.mtd.sales,
+      fcst: r.fcst.sales,
+      prev: r.prev.sales,
     }));
   return (
     <div className="data-page">
@@ -39,7 +39,7 @@ export default async function PlanPage({
         <details className="method-note">
           <summary>계산 기준</summary>
           <p>
-            계획은 구글 시트 plan_lv3(제품계층 LV3 × 월, 매출 원·수량 EA)이며 ‘비용·목표 입력 › 판매계획’에서 입력합니다. 매출은 총매출(장려금 차감 전)입니다. 달성률 = 계획이 있는 LV3의
+            계획은 구글 시트 plan_lv3(제품계층 LV3 × 월 매출 금액)이며 ‘비용·계획 입력 › 판매계획’에서 입력합니다. 매출은 총매출(장려금 차감 전)입니다. 달성률 = 계획이 있는 LV3의
             실적 ÷ 계획 — 계획이 없는 LV3 매출은 분자에서 빼고 ‘계획 미수립 LV3 매출’로 따로 보여 줍니다. 당월 누계는 월 계획 × 월 진행률과, 당월 예상은 월 계획 전체와, 전월 실적은 전월 계획과
             비교합니다. 매출이 없는 계획 LV3는 코드 앞자리(LV1 3자리·LV2 8자리)로 상위 계층에 붙입니다.
           </p>

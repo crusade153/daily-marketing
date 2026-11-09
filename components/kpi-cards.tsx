@@ -1,3 +1,4 @@
+import { costMissing } from '@/lib/cost-source';
 import { eok, pct, ppt, signedEok, tone } from '@/lib/format';
 import { metrics } from '@/lib/pnl';
 import { monthLabel } from '@/lib/period';
@@ -49,7 +50,8 @@ export default function KpiCards({
   const p = metrics(total.prev);
   const cur = monthLabel(curYm);
   const prv = monthLabel(prevYm);
-  const missing = inputStatus.curFilled === 0;
+  const missing = costMissing(inputStatus.cur);
+  const partial = inputStatus.cur.source === 'manual' && (inputStatus.cur.sg < inputStatus.sgTotal || inputStatus.cur.ch < inputStatus.chTotal);
   return (
     <section className="kpi-grid" aria-label="주요 경영지표">
       <Card
@@ -83,7 +85,7 @@ export default function KpiCards({
       <Card
         title={`${cur} 예상 영업이익`}
         main={eok(f.op)}
-        sub={<span>{missing ? '장려금·일반비 미반영' : inputStatus.curFilled < inputStatus.chTotal ? `일부 채널 비용 미반영 · OP율 ${pct(f.opm)}` : <>OP율 {pct(f.opm)} <span className={tone((f.opm ?? 0) - (p.opm ?? 0))}>({ppt(f.opm, p.opm)})</span></>}</span>}
+        sub={<span>{missing ? '장려금·일반비 미반영' : partial ? `일부 영업그룹·채널 비용 미입력 · OP율 ${pct(f.opm)}` : <>OP율 {pct(f.opm)} <span className={tone((f.opm ?? 0) - (p.opm ?? 0))}>({ppt(f.opm, p.opm)})</span></>}</span>}
         rows={[
           [`${cur} 누계`, eok(m.op)],
           [`${prv} 실적`, eok(p.op)],

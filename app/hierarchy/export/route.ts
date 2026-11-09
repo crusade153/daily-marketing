@@ -27,6 +27,8 @@ const DIM_COLS: { header: string; get: (r: RowDims) => string; width: number }[]
   { header: 'PM', get: (r) => r.owner, width: 10 },
   { header: '고객그룹3코드', get: (r) => r.ch, width: 8 },
   { header: '채널(고객그룹3)', get: (r) => r.cht, width: 14 },
+  { header: '영업그룹코드', get: (r) => r.sg, width: 8 },
+  { header: '영업그룹', get: (r) => r.sgt, width: 12 },
   { header: '영업담당자', get: (r) => r.rep, width: 10 },
 ];
 

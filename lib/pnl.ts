@@ -274,7 +274,7 @@ type ProductDims = Hierarchy & { matnr: string; name: string };
 
 const UNKNOWN_HIER = { l1: '-', l1t: '(미분류)', l2: '-', l2t: '(미분류)', l3: '-', l3t: '(미분류)', l4: '-', l4t: '(미분류)' };
 
-function dimsOf(f: ProductDims, m: ProductMap | undefined, ch: { ch: string; cht: string }, reps: Map<string, string>): RowDims {
+function dimsOf(f: ProductDims, m: ProductMap | undefined, ch: { ch: string; cht: string; sg: string; sgt: string }, reps: Map<string, string>): RowDims {
   return {
     matnr: f.matnr,
     name: f.name,
@@ -292,14 +292,17 @@ function dimsOf(f: ProductDims, m: ProductMap | undefined, ch: { ch: string; cht
     owner: m?.owner || UNMAPPED,
     ch: ch.ch,
     cht: ch.cht,
+    sg: ch.sg,
+    sgt: ch.sgt,
     rep: reps.get(ch.ch) || UNMAPPED,
   };
 }
 
-/** 채널 비용 중 그 달 그 채널 매출이 없어 제품에 붙일 수 없는 금액을 담는 행 (채널별 하나) */
-function channelOrphanDims(inp: Pick<ChannelInput, 'ch' | 'cht'>, reps: Map<string, string>): RowDims {
-  const code = `CH:${inp.ch}`;
-  const label = `(채널 비용) ${inp.cht || inp.ch}`;
+/** 채널(영업그룹) 비용 중 그 달 매출이 없어 제품에 붙일 수 없는 금액을 담는 행 (채널·영업그룹별 하나) */
+function channelOrphanDims(inp: Pick<ChannelInput, 'ch' | 'cht' | 'by'>, reps: Map<string, string>): RowDims {
+  const bySg = inp.by === 'sg';
+  const code = `${bySg ? 'SG' : 'CH'}:${inp.ch}`;
+  const label = `(${bySg ? '영업그룹' : '채널'} 비용) ${inp.cht || inp.ch}`;
   return {
     matnr: code,
     name: ORPHAN_NAME,
@@ -315,15 +318,17 @@ function channelOrphanDims(inp: Pick<ChannelInput, 'ch' | 'cht'>, reps: Map<stri
     cmMark: UNMAPPED,
     category: UNMAPPED,
     owner: UNMAPPED,
-    ch: inp.ch,
-    cht: inp.cht || inp.ch,
-    rep: reps.get(inp.ch) || UNMAPPED,
+    ch: bySg ? '-' : inp.ch,
+    cht: bySg ? '(채널 없음)' : inp.cht || inp.ch,
+    sg: bySg ? inp.ch : '-',
+    sgt: bySg ? inp.cht || inp.ch : '(영업그룹 없음)',
+    rep: bySg ? UNMAPPED : reps.get(inp.ch) || UNMAPPED,
   };
 }
 
 /**
- * 채널 입력 금액(장려금·일반비 고정비)을 그 채널 행들의 매출 비중으로 나눠 add로 넘긴다.
- * 매출이 없는 채널은 extra의 채널별 보관 행으로. 변동비율은 채널의 모든 행에 addRate(행, 비율)로 넘긴다.
+ * 입력 금액(장려금·일반비)을 그 채널(by 'ch') 또는 영업그룹(by 'sg') 행들의 매출 비중으로 나눠 add로 넘긴다.
+ * 매출이 없으면 extra의 채널·영업그룹별 보관 행으로. 변동비율은 그 묶음의 모든 행에 addRate(행, 비율)로 넘긴다.
  */
 function spreadChannelInputs<R extends RowDims>(
   rows: R[],
@@ -335,14 +340,17 @@ function spreadChannelInputs<R extends RowDims>(
   make: (d: RowDims) => R,
   reps: Map<string, string>,
 ) {
-  const byCh = new Map<string, R[]>();
+  const groups = { ch: new Map<string, R[]>(), sg: new Map<string, R[]>() };
   for (const r of rows) {
-    const list = byCh.get(r.ch);
-    if (list) list.push(r);
-    else byCh.set(r.ch, [r]);
+    if (r.name === ORPHAN_NAME) continue;
+    for (const by of ['ch', 'sg'] as const) {
+      const list = groups[by].get(r[by]);
+      if (list) list.push(r);
+      else groups[by].set(r[by], [r]);
+    }
   }
   for (const inp of inputs) {
-    const list = byCh.get(inp.ch) ?? [];
+    const list = groups[inp.by ?? 'ch'].get(inp.ch) ?? [];
     if (inp.rate) for (const r of list) addRate(r, inp.rate / 100);
     if (!inp.incentive && !inp.general) continue;
     const w = list.map(weight);
@@ -362,7 +370,7 @@ function spreadChannelInputs<R extends RowDims>(
   }
 }
 
-const rowKey = (matnr: string, ch: string) => `${matnr}|${ch}`;
+const rowKey = (c: Pick<ChannelFact, 'matnr' | 'ch' | 'sg'>) => `${c.matnr}|${c.ch}|${c.sg}`;
 
 export function buildRows(params: {
   /** 제품 단위: 계층·3개월 원가 이력 */
@@ -388,7 +396,7 @@ export function buildRows(params: {
 
   const byKey = new Map<string, MaterialRow>();
   const at = (c: ChannelFact): MaterialRow => {
-    const key = rowKey(c.matnr, c.ch);
+    const key = rowKey(c);
     let r = byKey.get(key);
     if (!r) {
       const f = factBy.get(c.matnr);
@@ -511,7 +519,7 @@ export function byProduct(rows: MaterialRow[]): MaterialRow[] {
   for (const r of rows) {
     const p = map.get(r.matnr);
     if (!p) {
-      map.set(r.matnr, { ...r, ch: '*', cht: '전체', rep: '-', mtd: { ...r.mtd }, fcst: { ...r.fcst }, prev: { ...r.prev }, prev2: { ...r.prev2 } });
+      map.set(r.matnr, { ...r, ch: '*', cht: '전체', sg: '*', sgt: '전체', rep: '-', mtd: { ...r.mtd }, fcst: { ...r.fcst }, prev: { ...r.prev }, prev2: { ...r.prev2 } });
       continue;
     }
     p.mtd = addAmounts(p.mtd, r.mtd);
@@ -524,7 +532,7 @@ export function byProduct(rows: MaterialRow[]): MaterialRow[] {
 }
 
 /** 분석 축. 제품계층은 코드로 묶고 이름으로 보여준다 (이름이 같은 다른 계층이 섞이지 않도록) */
-export type Axis = 'l1' | 'l2' | 'l3' | 'l4' | 'cm' | 'category' | 'owner' | 'name' | 'ch' | 'rep';
+export type Axis = 'l1' | 'l2' | 'l3' | 'l4' | 'cm' | 'category' | 'owner' | 'name' | 'ch' | 'sg' | 'rep';
 
 export const AXIS_LABEL: Record<Axis, string> = {
   l1: '브랜드',
@@ -536,6 +544,7 @@ export const AXIS_LABEL: Record<Axis, string> = {
   owner: 'PM',
   name: '제품',
   ch: '채널',
+  sg: '영업그룹',
   rep: '영업담당자',
 };
 
@@ -557,6 +566,8 @@ export function axisLabel(r: RowDims, axis: Axis): string {
       return r.l4t;
     case 'ch':
       return r.cht;
+    case 'sg':
+      return r.sgt;
     default:
       return r[axis];
   }

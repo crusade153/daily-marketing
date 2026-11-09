@@ -2,8 +2,8 @@ import 'server-only';
 import { unstable_cache } from 'next/cache';
 import { runQuery } from './bigquery';
 import { getPeriods, kstToday, monthEnd, monthLabel, progressOf, shiftYm, yearStartOf, ymRange, type Periods } from './period';
-import { applyCostBasis, applyLineOwners, buildMonthRows, buildRows, estimateFactsCogs, factsClosed, forecastFactor, ORPHAN_NAME, type Axis } from './pnl';
-import { closedLinkMonth, lastClosedYm, linkActualInputs, linkForecastInputs, linkFromRows, stripCh, type ChannelNames, type SgaLink, type SgaLinkRow } from './sga-link';
+import { applyCostBasis, applyLineOwners, buildMonthRows, buildRows, estimateFactsCogs, factsClosed, ORPHAN_NAME, type Axis } from './pnl';
+import { lastClosedYm, linkActualInputs, linkFromRows, stripCh, type ChannelNames, type SgaLink, type SgaLinkRow } from './sga-link';
 import type { PlanLv3 } from './plan';
 import { MOMENTUM_AXES, momentum, opBridge, whaleCurve, type InsightData, type InsightPair } from './insight';
 import { buildLedger, GENERAL_ITEMS, ledgerInputs, type GlMonthCost, type GlRow, type Ledger, type LedgerMonth } from './ledger';
@@ -12,6 +12,8 @@ import { getStore, storageKind, TABS, type Cell } from './sheets';
 import { SEG_PERIODS, type SegAmounts, type SegPeriod, type SegProduct } from './segment';
 import { aggregateTrend, toMonthRows, type MonthBlock, type TrendData } from './trend';
 import type {
+  CostSource,
+  MonthInputStatus,
   ChannelFact,
   ChannelInput,
   ChannelOwner,
@@ -237,7 +239,9 @@ interface ChannelRaw {
   months: string[];
   mats: string[];
   chs: { code: string; name: string }[];
-  rows: [number, number, number, number, number, number][];
+  sgs: { code: string; name: string }[];
+  /** [제품, 채널, 영업그룹, 월 순번, 매출, 수량, 원가] */
+  rows: [number, number, number, number, number, number, number][];
 }
 
 const CHANNEL_CHUNK = 6;
@@ -251,28 +255,30 @@ function channelMonths(p: Periods): string[] {
 
 async function queryChannel(p: Periods, part: number): Promise<ChannelRaw> {
   const months = channelMonths(p).slice(part * CHANNEL_CHUNK, (part + 1) * CHANNEL_CHUNK);
-  if (!months.length) return { months, mats: [], chs: [], rows: [] };
+  if (!months.length) return { months, mats: [], chs: [], sgs: [], rows: [] };
   const lastEnd = `${months[months.length - 1]}31`;
   const rows = await runQuery<Record<string, unknown>>(
     `
     WITH k AS (
-      SELECT KUNNR, VKORG, VTWEG, ANY_VALUE(KVGR3) ch, ANY_VALUE(KVGR3_T) cht
+      SELECT KUNNR, VKORG, VTWEG, ANY_VALUE(KVGR3) ch, ANY_VALUE(KVGR3_T) cht, ANY_VALUE(VKGRP) sg, ANY_VALUE(VKGRP_T) sgt
       FROM ${KNVV} GROUP BY 1, 2, 3
     )
     SELECT IFNULL(c.ARTNR, '') AS matnr, SUBSTR(c.BUDAT, 1, 6) AS ym,
       IFNULL(NULLIF(k.ch, ''), '-') AS ch, ANY_VALUE(IFNULL(k.cht, '(미지정)')) AS cht,
+      IFNULL(NULLIF(k.sg, ''), '-') AS sg, ANY_VALUE(IFNULL(k.sgt, '(미지정)')) AS sgt,
       ROUND(SUM(c.VV101)) AS s, ROUND(SUM(c.ABSMG_EA), 3) AS q, ROUND(SUM(c.VV_COGS_A)) AS g
     FROM ${COPA} c
     LEFT JOIN k ON k.KUNNR = c.KNDNR AND k.VKORG = c.VKORG AND k.VTWEG = c.VTWEG
     WHERE ${COPA_FILTER} AND c.BUDAT BETWEEN @start AND @end
-    GROUP BY 1, 2, 3
+    GROUP BY 1, 2, 3, 5
     HAVING s != 0 OR q != 0 OR g != 0
     `,
     { start: `${months[0]}01`, end: lastEnd < p.today ? lastEnd : p.today },
   );
   const matIdx = new Map<string, number>();
   const chIdx = new Map<string, number>();
-  const raw: ChannelRaw = { months, mats: [], chs: [], rows: [] };
+  const sgIdx = new Map<string, number>();
+  const raw: ChannelRaw = { months, mats: [], chs: [], sgs: [], rows: [] };
   for (const r of rows) {
     const matnr = str(r.matnr);
     let pi = matIdx.get(matnr);
@@ -286,18 +292,24 @@ async function queryChannel(p: Periods, part: number): Promise<ChannelRaw> {
       ci = raw.chs.push({ code, name: str(r.cht) || code }) - 1;
       chIdx.set(code, ci);
     }
+    const sgCode = str(r.sg);
+    let si = sgIdx.get(sgCode);
+    if (si == null) {
+      si = raw.sgs.push({ code: sgCode, name: str(r.sgt) || sgCode }) - 1;
+      sgIdx.set(sgCode, si);
+    }
     const mi = months.indexOf(str(r.ym));
-    if (mi >= 0) raw.rows.push([pi, ci, mi, num(r.s), num(r.q), num(r.g)]);
+    if (mi >= 0) raw.rows.push([pi, ci, si, mi, num(r.s), num(r.q), num(r.g)]);
   }
   return raw;
 }
 
-const cachedChannel = unstable_cache(async (today: string, part: number) => queryChannel(getPeriods(today), part), ['copa-channel-v4'], {
+const cachedChannel = unstable_cache(async (today: string, part: number) => queryChannel(getPeriods(today), part), ['copa-channel-v5'], {
   revalidate: 3600,
   tags: ['bq'],
 });
 
-/** 월 → 제품 × 채널 실적 */
+/** 월 → 제품 × 채널 × 영업그룹 실적 */
 async function getChannelFacts(today: string): Promise<Map<string, ChannelFact[]>> {
   const p = getPeriods(today);
   const months = channelMonths(p);
@@ -305,27 +317,32 @@ async function getChannelFacts(today: string): Promise<Map<string, ChannelFact[]
   const raws = await Promise.all(Array.from({ length: parts }, (_, i) => cachedChannel(p.today, i)));
   const out = new Map<string, ChannelFact[]>(months.map((m) => [m, []]));
   for (const raw of raws) {
-    for (const [pi, ci, mi, sales, qty, cogs] of raw.rows) {
+    for (const [pi, ci, si, mi, sales, qty, cogs] of raw.rows) {
       const ch = raw.chs[ci];
-      out.get(raw.months[mi])?.push({ matnr: raw.mats[pi], ch: ch.code, cht: ch.name, sales, qty, cogs });
+      const sg = raw.sgs[si];
+      out.get(raw.months[mi])?.push({ matnr: raw.mats[pi], ch: ch.code, cht: ch.name, sg: sg.code, sgt: sg.name, sales, qty, cogs });
     }
   }
   return out;
 }
 
-/** 입력 화면용: 고객그룹3별 월 매출 (마감월 실적, 당월 누계) */
+/** 입력 화면용: 고객그룹3·영업그룹별 월 매출 (마감월 실적, 당월 누계) */
 export async function getChannelTotals(today?: string) {
   const p = getPeriods(today);
   const facts = await getChannelFacts(p.today);
-  const items = new Map<string, { code: string; name: string; sales: Record<string, number> }>();
+  type Item = { code: string; name: string; sales: Record<string, number> };
+  const chs = new Map<string, Item>();
+  const sgs = new Map<string, Item>();
   for (const [ym, list] of facts) {
     for (const f of list) {
-      const it = items.get(f.ch) ?? { code: f.ch, name: f.cht, sales: {} };
-      it.sales[ym] = (it.sales[ym] ?? 0) + f.sales;
-      items.set(f.ch, it);
+      for (const [map, code, name] of [[chs, f.ch, f.cht], [sgs, f.sg, f.sgt]] as const) {
+        const it = map.get(code) ?? { code, name, sales: {} };
+        it.sales[ym] = (it.sales[ym] ?? 0) + f.sales;
+        map.set(code, it);
+      }
     }
   }
-  return [...items.values()];
+  return { channels: [...chs.values()], groups: [...sgs.values()] };
 }
 
 // ── 시트(수기 데이터) ──────────────────────────────────────────
@@ -421,6 +438,26 @@ async function readChannelInputs(): Promise<ChannelInput[]> {
 }
 export const getChannelInputs = unstable_cache(readChannelInputs, ['manual-input-channel-v3'], { revalidate: 300, tags: ['manual'] });
 
+async function readSgInputs(): Promise<ChannelInput[]> {
+  // 열: YYYYMM · 영업그룹 · 영업그룹명 · 장려금 · 수정일시 · 수정자
+  const rows = await getStore().read(TABS.sgInput);
+  return rows
+    .map(({ values: v }) => ({
+      ym: toStr(v[0]),
+      by: 'sg' as const,
+      ch: toStr(v[1]),
+      cht: toStr(v[2]),
+      incentive: toNum(v[3]),
+      general: 0,
+      rate: 0,
+      updatedAt: toStr(v[4]),
+      updatedBy: toStr(v[5]),
+    }))
+    .filter((c) => c.ym && c.ch);
+}
+/** 장려금 수기 입력: 영업그룹 × 월 */
+export const getSgInputs = unstable_cache(readSgInputs, ['manual-input-sg-v1'], { revalidate: 300, tags: ['manual'] });
+
 async function readTargets(): Promise<Target[]> {
   const rows = await getStore().read(TABS.target);
   return rows
@@ -443,14 +480,13 @@ async function readPlans(): Promise<PlanLv3[]> {
       l3: toStr(v[1]),
       l3t: toStr(v[2]),
       sales: toNum(v[3]),
-      qty: toNum(v[4]),
-      updatedAt: toStr(v[5]),
-      updatedBy: toStr(v[6]),
+      updatedAt: toStr(v[4]),
+      updatedBy: toStr(v[5]),
     }))
     .filter((p) => p.ym.length === 6 && p.l3);
 }
 /** 판매계획 (제품계층 LV3 × 월) */
-export const getPlans = unstable_cache(readPlans, ['plan-lv3-v1'], { revalidate: 300, tags: ['manual'] });
+export const getPlans = unstable_cache(readPlans, ['plan-lv3-v2'], { revalidate: 300, tags: ['manual'] });
 
 /** 그 달 제품 목표 (같은 제품이 여러 줄이면 합산) */
 export function targetMapOf(targets: Target[], ym: string): TargetMap {
@@ -511,65 +547,52 @@ async function readSgaLink(): Promise<SgaLink> {
 }
 export const getSgaLink = unstable_cache(readSgaLink, ['sga-link-v1'], { revalidate: 3600, tags: ['manual'] });
 
-export interface ChannelCosts {
-  inputs: ChannelInput[];
-  /** SAP 원장 실적(매출 비중 배부)으로 채운 달 */
-  ledgerYms: string[];
-  /** 판관비 대시보드 마감 실적으로 채운 달 */
-  sgaYms: string[];
-  /** 판관비 대시보드 최근 마감 비율로 예측한 달 */
-  sgaFcstYms: string[];
-}
-
 /**
- * 손익 계산에 쓰는 채널 비용. 달마다 원천 하나만 쓴다 (섞으면 어디까지가 어느 값인지 알 수 없다):
- *   1 수기 입력이 한 채널이라도 있는 달 → 수기 입력
- *   2 판관비 대시보드 마감 실적이 있는 달 → 그 실적 (장려금·판관비 채널 배부액)
- *   3 마지막 마감 실적 뒤의 달(마감 중인 전월·당월) → 직전 3개월 채널 비율로 예측
- *   4 그 밖의 마감월 → SAP 원장 실적을 매출 비중으로 배부 (연동 전 방식)
- * fcstScale: 당월 누계 매출 → 월말 예상 매출 배수
+ * 손익 계산에 쓰는 장려금·일반비. 달마다 원천 하나만 쓴다 (섞으면 어디까지가 어느 값인지 알 수 없다):
+ *   1 판관비 대시보드 연동 데이터가 있는 달(올해 1월 ~ 내보낸 마지막 달, 미마감 포함) → 그 데이터 (고객그룹3 배부액)
+ *   2 그 뒤의 달(당월 등) → 수기 입력: 장려금 = 영업그룹, 일반비 = 고객그룹3 (2026-11-09 사용자 결정)
+ *   3 연동 전 마감월 중 수기 입력이 없는 달 → SAP 원장 실적을 매출 비중으로 배부 (연동 전 방식)
  */
-function withChannelCosts(manual: ChannelInput[], gl: GlMonthCost[], chFacts: Map<string, ChannelFact[]>, curYm: string, fcstScale: number, link: SgaLink): ChannelCosts {
+function withChannelCosts(manual: ChannelInput[], gl: GlMonthCost[], chFacts: Map<string, ChannelFact[]>, link: SgaLink): { inputs: ChannelInput[]; source: Record<string, CostSource> } {
   const names: ChannelNames = new Map();
   for (const list of chFacts.values()) for (const f of list) if (!names.has(stripCh(f.ch))) names.set(stripCh(f.ch), { ch: f.ch, cht: f.cht });
-  const lastClosed = lastClosedYm(link);
-  const out: ChannelInput[] = [];
-  const sgaYms: string[] = [];
-  const sgaFcstYms: string[] = [];
-  const ledgerCosts: GlMonthCost[] = [];
+  const linked = new Map(link.months.map((m) => [m.ym, m]));
   const glByYm = new Map(gl.map((c) => [c.ym, c]));
-  for (const [ym, facts] of [...chFacts].sort((a, b) => a[0].localeCompare(b[0]))) {
-    if (filledCount(manual, ym)) continue;
-    const closed = closedLinkMonth(link, ym);
-    if (closed) {
-      out.push(...linkActualInputs(closed, names));
-      sgaYms.push(ym);
+  const out: ChannelInput[] = [];
+  const ledgerCosts: GlMonthCost[] = [];
+  const source: Record<string, CostSource> = {};
+  for (const ym of [...chFacts.keys()].sort()) {
+    const m = linked.get(ym);
+    if (m) {
+      out.push(...linkActualInputs(m, names));
+      source[ym] = m.closed ? 'link' : 'open';
       continue;
     }
-    if (lastClosed && ym > lastClosed && ym <= curYm) {
-      const byCh = new Map<string, { ch: string; cht: string; sales: number }>();
-      for (const f of facts) {
-        const a = byCh.get(f.ch) ?? { ch: f.ch, cht: f.cht, sales: 0 };
-        a.sales += f.sales;
-        byCh.set(f.ch, a);
-      }
-      const scale = ym === curYm ? fcstScale : 1;
-      const fc = linkForecastInputs(link, ym, [...byCh.values()].map((c) => ({ ...c, sales: c.sales * scale })));
-      if (fc.length) {
-        out.push(...fc);
-        sgaFcstYms.push(ym);
-        continue;
-      }
+    const mine = manual.filter((i) => i.ym === ym && (i.incentive || i.general));
+    if (mine.length) {
+      out.push(...mine);
+      source[ym] = 'manual';
+      continue;
     }
     const g = glByYm.get(ym);
-    if (g) ledgerCosts.push(g);
+    if (g && (g.adj || g.general)) {
+      ledgerCosts.push(g);
+      source[ym] = 'ledger';
+      continue;
+    }
+    source[ym] = 'none';
   }
-  const filled = ledgerInputs(ledgerCosts, chFacts);
-  return { inputs: [...manual, ...out, ...filled], ledgerYms: [...new Set(filled.map((i) => i.ym))], sgaYms, sgaFcstYms };
+  return { inputs: [...out, ...ledgerInputs(ledgerCosts, chFacts)], source };
+}
+
+/** 그 달 수기 입력 현황: 장려금 입력 영업그룹 수, 일반비 입력 고객그룹3 수 */
+function monthInput(manual: ChannelInput[], source: Record<string, CostSource>, ym: string): MonthInputStatus {
+  const mine = manual.filter((i) => i.ym === ym);
+  return { source: source[ym] ?? 'none', sg: mine.filter((i) => i.by === 'sg' && i.incentive).length, ch: mine.filter((i) => i.by !== 'sg' && i.general).length };
 }
 
 /** 연동 원천 정보 (화면 안내용) */
-const sgaLinkInfo = (link: SgaLink) => ({ generatedAt: link.generatedAt, lastClosed: lastClosedYm(link) });
+const sgaLinkInfo = (link: SgaLink) => ({ generatedAt: link.generatedAt, lastClosed: lastClosedYm(link), lastYm: link.months.at(-1)?.ym ?? '' });
 
 /**
  * 원가 결산 전인 지난달(당월 제외)은 CO-PA 원가가 거의 0이라 실적 이익이 부풀려 보인다.
@@ -594,6 +617,15 @@ export async function getFacts(today?: string) {
 }
 
 const filledCount = (inputs: ChannelInput[], ym: string) => inputs.filter((i) => i.ym === ym && (i.incentive || i.general || i.rate)).length;
+
+/** 손익 계산용 수기 입력: 고객그룹3 일반비(금액) + 영업그룹 장려금. 예전 고객그룹3 장려금·변동비율 열은 쓰지 않는다 */
+async function getManualCosts(): Promise<ChannelInput[]> {
+  const [chs, sgs] = await Promise.all([getChannelInputs(), getSgInputs()]);
+  return [
+    ...chs.filter((c) => c.general).map((c) => ({ ...c, by: 'ch' as const, incentive: 0, rate: 0 })),
+    ...sgs.filter((s) => s.incentive),
+  ];
+}
 const channelCount = (rows: { ch: string; name: string }[], sales: (r: { ch: string; name: string }) => number) =>
   new Set(rows.filter((r) => r.name !== ORPHAN_NAME && sales(r)).map((r) => r.ch)).size;
 
@@ -603,7 +635,7 @@ export async function getDashboard(today?: string): Promise<DashboardData> {
     cachedMaterials(p.today),
     cachedDaily(p.today),
     getEffectiveMap(),
-    getChannelInputs(),
+    getManualCosts(),
     getChannelFacts(p.today),
     getRepMap(),
     getTargets(),
@@ -619,7 +651,7 @@ export async function getDashboard(today?: string): Promise<DashboardData> {
   const curDates = daily.filter((d) => d.date >= p.curStart).map((d) => d.date);
   const dataDate = curDates.length ? curDates.reduce((a, b) => (a > b ? a : b)) : null;
   const progress = progressOf(dataDate, p.daysInMonth);
-  const { inputs, ledgerYms, sgaYms, sgaFcstYms } = withChannelCosts(manual, gl, chFacts, p.curYm, forecastFactor(progress.elapsed, p.daysInMonth), link);
+  const { inputs, source } = withChannelCosts(manual, gl, chFacts, link);
 
   const curInputs = inputs.filter((i) => i.ym === p.curYm);
   const prevInputs = inputs.filter((i) => i.ym === p.prevYm);
@@ -657,12 +689,11 @@ export async function getDashboard(today?: string): Promise<DashboardData> {
     coverage,
     inputStatus: {
       chTotal: new Set(rows.filter((r) => r.name !== ORPHAN_NAME && (r.mtd.sales || r.prev.sales)).map((r) => r.ch)).size,
-      curFilled: filledCount(inputs, p.curYm),
-      prevFilled: filledCount(inputs, p.prevYm),
+      sgTotal: new Set(rows.filter((r) => r.name !== ORPHAN_NAME && (r.mtd.sales || r.prev.sales)).map((r) => r.sg)).size,
+      cur: monthInput(manual, source, p.curYm),
+      prev: monthInput(manual, source, p.prevYm),
     },
-    ledgerYms,
-    sgaYms,
-    sgaFcstYms,
+    costSource: source,
     sgaLink: sgaLinkInfo(link),
     targets: { cur: targetMapOf(targets, p.curYm), prev: targetMapOf(targets, p.prevYm) },
     storage: storageKind(),
@@ -679,7 +710,7 @@ export async function getMonthBlocks(today?: string) {
     getDashboard(today),
     closed.length ? cachedMonthly(p.today).then(expandMonthly) : Promise.resolve([] as MonthFact[]),
     getEffectiveMap(),
-    getChannelInputs(),
+    getManualCosts(),
     getChannelFacts(p.today),
     getRepMap(),
     getGlCosts(p),
@@ -687,12 +718,12 @@ export async function getMonthBlocks(today?: string) {
     getSgaLink(),
   ]);
   const { chFacts, estYms } = withEstimatedCogs(rawChFacts, facts, p.curYm);
-  const { inputs } = withChannelCosts(manual, gl, chFacts, p.curYm, forecastFactor(d.progress.elapsed, d.progress.daysInMonth), link);
+  const { inputs } = withChannelCosts(manual, gl, chFacts, link);
   const dims = new Map(monthly.map((f) => [f.matnr, f]));
 
   const blocks: MonthBlock[] = closed.map((ym) => {
     const rows = buildMonthRows({ facts: chFacts.get(ym) ?? [], dims, maps, reps, inputs: inputs.filter((i) => i.ym === ym) });
-    return { ym, kind: 'actual', rows, filled: filledCount(inputs, ym), chTotal: channelCount(rows, (r) => (r as MonthRow).amt.sales), ledger: d.ledgerYms.includes(ym) || undefined, sga: d.sgaYms.includes(ym) ? 'actual' : d.sgaFcstYms.includes(ym) ? 'fcst' : undefined, costEst: estYms.includes(ym) || undefined };
+    return { ym, kind: 'actual', rows, filled: filledCount(inputs, ym), chTotal: channelCount(rows, (r) => (r as MonthRow).amt.sales), source: d.costSource[ym], costEst: estYms.includes(ym) || undefined };
   });
   const curRows = toMonthRows(d.rows, 'fcst');
   blocks.push({
@@ -701,7 +732,7 @@ export async function getMonthBlocks(today?: string) {
     rows: curRows,
     filled: filledCount(inputs, p.curYm),
     chTotal: channelCount(curRows, (r) => (r as MonthRow).amt.sales),
-    sga: d.sgaYms.includes(p.curYm) ? 'actual' : d.sgaFcstYms.includes(p.curYm) ? 'fcst' : undefined,
+    source: d.costSource[p.curYm],
   });
   return { d, blocks, inputs, monthly };
 }
@@ -710,7 +741,7 @@ export async function getTrend(axis: Axis, today?: string): Promise<TrendData> {
   const { d, blocks } = await getMonthBlocks(today);
   return {
     axis,
-    months: blocks.map(({ ym, kind, filled, chTotal, ledger, sga, costEst }) => ({ ym, kind, filled, chTotal, ledger, sga, costEst })),
+    months: blocks.map(({ ym, kind, filled, chTotal, source, costEst }) => ({ ym, kind, filled, chTotal, source, costEst })),
     ...aggregateTrend(blocks, axis),
     dataDate: d.dataDate,
   };
@@ -842,7 +873,7 @@ export async function getInsights(today?: string): Promise<InsightData> {
   const seq: MonthBlock[] =
     blocks.length >= 2
       ? blocks
-      : [{ ym: d.prevYm, kind: 'actual', rows: toMonthRows(d.rows, 'prev'), filled: d.inputStatus.prevFilled, chTotal: d.inputStatus.chTotal }, ...blocks];
+      : [{ ym: d.prevYm, kind: 'actual', rows: toMonthRows(d.rows, 'prev'), filled: d.inputStatus.prev.ch + d.inputStatus.prev.sg, chTotal: d.inputStatus.chTotal }, ...blocks];
   const n = seq.length;
   const label = (b: MonthBlock) => `${monthLabel(b.ym)} ${b.kind === 'fcst' ? '예상' : '실적'}`;
 

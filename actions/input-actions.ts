@@ -47,56 +47,57 @@ const fail = (name: string, e: unknown): SaveResult => {
 };
 const cellKey = (...v: Cell[]) => v.map((x) => String(x ?? '').trim()).join('|');
 
-const ChannelSaveInput = z.object({
+const AmountSaveInput = z.object({
   ym: z.string().regex(/^\d{6}$/),
   user: z.string().trim().max(40),
-  entries: z
-    .array(
-      z.object({ ch: z.string().min(1).max(20), cht: z.string().max(80), incentive: Amount, general: Amount, rate: z.number().finite().min(-100).max(100) }),
-    )
-    .max(500),
+  entries: z.array(z.object({ key: z.string().min(1).max(30), name: z.string().max(120), amount: Amount })).max(2000),
 });
 
-/** 장려금·일반비 고객그룹3 입력 저장. (YYYYMM, 고객그룹3) 기준 upsert. 열 순서는 TABS.channelInput (고정비·변동비율이 끝) */
-export async function saveChannelInputs(input: unknown): Promise<SaveResult> {
+/** 장려금 저장: 영업그룹 × 월 (원). (YYYYMM, 영업그룹) 기준 upsert */
+export async function saveSgIncentives(input: unknown): Promise<SaveResult> {
   if (!(await getSession())) return NO_SESSION;
-  const parsed = ChannelSaveInput.safeParse(input);
+  const parsed = AmountSaveInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: '입력값 형식이 올바르지 않습니다.' };
+  const { ym, user, entries } = parsed.data;
+  const at = nowKst();
+  try {
+    return await upsert(TABS.sgInput, entries.map((e) => [ym, e.key, e.name, Math.round(e.amount), at, user || '-']), (v) => cellKey(v[0], v[1]));
+  } catch (e) {
+    return fail('saveSgIncentives', e);
+  }
+}
+
+/**
+ * 일반비 저장: 고객그룹3 × 월 (원). 기존 탭 manual_input_channel의 '일반비 고정비' 열에 쓴다.
+ * 장려금(영업그룹으로 옮김)·변동비율(폐지) 열은 0으로 비운다 — 2026-11-09 사용자 결정
+ */
+export async function saveChannelGenerals(input: unknown): Promise<SaveResult> {
+  if (!(await getSession())) return NO_SESSION;
+  const parsed = AmountSaveInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: '입력값 형식이 올바르지 않습니다.' };
   const { ym, user, entries } = parsed.data;
   const at = nowKst();
   try {
     return await upsert(
       TABS.channelInput,
-      entries.map((e) => [ym, e.ch, e.cht, Math.round(e.incentive), at, user || '-', Math.round(e.general), Math.round(e.rate * 1000) / 1000]),
+      entries.map((e) => [ym, e.key, e.name, 0, at, user || '-', Math.round(e.amount), 0]),
       (v) => cellKey(v[0], v[1]),
       true,
     );
   } catch (e) {
-    return fail('saveChannelInputs', e);
+    return fail('saveChannelGenerals', e);
   }
 }
 
-const PlanSaveInput = z.object({
-  ym: z.string().regex(/^\d{6}$/),
-  user: z.string().trim().max(40),
-  entries: z
-    .array(z.object({ l3: z.string().min(1).max(30), l3t: z.string().max(120), sales: Amount, qty: z.number().finite().min(-1e12).max(1e12) }))
-    .max(2000),
-});
-
-/** 판매계획 저장: 제품계층 LV3 × 월. (YYYYMM, LV3) 기준 upsert. 금액은 원, 수량은 EA */
+/** 판매계획 저장: 제품계층 LV3 × 월 매출 금액(원). (YYYYMM, LV3) 기준 upsert */
 export async function savePlans(input: unknown): Promise<SaveResult> {
   if (!(await getSession())) return NO_SESSION;
-  const parsed = PlanSaveInput.safeParse(input);
+  const parsed = AmountSaveInput.safeParse(input);
   if (!parsed.success) return { ok: false, error: '입력값 형식이 올바르지 않습니다.' };
   const { ym, user, entries } = parsed.data;
   const at = nowKst();
   try {
-    return await upsert(
-      TABS.plan,
-      entries.map((e) => [ym, e.l3, e.l3t, Math.round(e.sales), Math.round(e.qty), at, user || '-']),
-      (v) => cellKey(v[0], v[1]),
-    );
+    return await upsert(TABS.plan, entries.map((e) => [ym, e.key, e.name, Math.round(e.amount), at, user || '-']), (v) => cellKey(v[0], v[1]));
   } catch (e) {
     return fail('savePlans', e);
   }

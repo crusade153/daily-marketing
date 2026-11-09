@@ -54,7 +54,7 @@ const fact = (o: Partial<MaterialFact>): MaterialFact => ({
   ...o,
 });
 
-const cf = (matnr: string, ch: string, sales: number, qty = 0, cogs = 0): ChannelFact => ({ matnr, ch, cht: `채널${ch}`, sales, qty, cogs });
+const cf = (matnr: string, ch: string, sales: number, qty = 0, cogs = 0, sg = 'S1'): ChannelFact => ({ matnr, ch, cht: `채널${ch}`, sg, sgt: `영업그룹${sg}`, sales, qty, cogs });
 const ci = (ym: string, ch: string, incentive: number, general: number, rate = 0): ChannelInput => ({
   ym,
   ch,
@@ -247,6 +247,8 @@ test('월별 추이: 축별 합계 = 전체, 브리지 막대 합 = 전체 차�
     owner: '',
     ch: 'E',
     cht: 'E',
+    sg: 'S',
+    sgt: 'S',
     rep: '',
     amt: { sales, qty: 0, cogs, incentive: 0, general: 0 },
   });
@@ -375,4 +377,39 @@ test('원가 결산 전인 달: CO-PA 원가 대신 원가 기준 단위원가 �
   assert.equal(est[0].cogs, 800); // 10 × 80
   assert.equal(est[1].cogs, 400); // 이력 없는 제품 = 전체 원가율 0.8 × 매출
   assert.equal(list[0].cogs, 5); // 원본은 그대로
+});
+
+test('영업그룹 장려금: 같은 영업그룹 행(여러 채널)에 매출 비중으로, 고객그룹3 일반비는 채널 안에서', () => {
+  const rows = buildMonthRows({
+    facts: [cf('a', 'E', 300, 0, 0, 'S1'), cf('b', 'F', 100, 0, 0, 'S1'), cf('a', 'E', 600, 0, 0, 'S2')],
+    dims: new Map(),
+    maps: [],
+    reps: new Map(),
+    inputs: [
+      { ym: '202611', by: 'sg', ch: 'S1', cht: '매스', incentive: 40, general: 0, rate: 0, updatedAt: '', updatedBy: '' },
+      { ym: '202611', ch: 'E', cht: '채널E', incentive: 0, general: 90, rate: 0, updatedAt: '', updatedBy: '' },
+    ],
+  });
+  const at = (m: string, ch: string, sg: string) => rows.find((r) => r.matnr === m && r.ch === ch && r.sg === sg)!.amt;
+  assert.equal(at('a', 'E', 'S1').incentive, 30);
+  assert.equal(at('b', 'F', 'S1').incentive, 10);
+  assert.equal(at('a', 'E', 'S2').incentive, 0);
+  // 일반비 90: 채널 E 안 매출 300 : 600
+  assert.equal(at('a', 'E', 'S1').general, 30);
+  assert.equal(at('a', 'E', 'S2').general, 60);
+  assert.equal(at('b', 'F', 'S1').general, 0);
+});
+
+test('매출 없는 영업그룹 장려금은 영업그룹 비용 행으로', () => {
+  const rows = buildMonthRows({
+    facts: [cf('a', 'E', 100, 0, 0, 'S1')],
+    dims: new Map(),
+    maps: [],
+    reps: new Map(),
+    inputs: [{ ym: '202611', by: 'sg', ch: 'S9', cht: '수출', incentive: 50, general: 0, rate: 0, updatedAt: '', updatedBy: '' }],
+  });
+  const orphan = rows.find((r) => r.matnr === 'SG:S9')!;
+  assert.equal(orphan.amt.incentive, 50);
+  assert.equal(orphan.sg, 'S9');
+  assert.equal(orphan.sgt, '수출');
 });

@@ -5,7 +5,7 @@ import { headlineFactor, momentum, momentumKind, opBridge, whaleCurve } from '..
 import { buildMonthRows, metrics, ZERO } from '../lib/pnl.ts';
 import type { ChannelFact, ChannelInput, MonthRow } from '../lib/types.ts';
 
-const cf = (matnr: string, ch: string, sales: number, qty = 0, cogs = 0): ChannelFact => ({ matnr, ch, cht: `채널${ch}`, sales, qty, cogs });
+const cf = (matnr: string, ch: string, sales: number, qty = 0, cogs = 0, sg = 'S1'): ChannelFact => ({ matnr, ch, cht: `채널${ch}`, sg, sgt: `영업그룹${sg}`, sales, qty, cogs });
 const ci = (ch: string, incentive: number, general: number): ChannelInput => ({
   ym: '202609',
   ch,

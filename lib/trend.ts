@@ -1,6 +1,6 @@
 // 월별 추이 순수 계산. 월별 품목 손익 행 → 축별 월 시계열, 전월 대비 차이 브리지.
 import { addAmounts, axisKey, axisLabel, cmGroupRank, metrics, ZERO, type Axis } from './pnl.ts';
-import type { Amounts, MaterialRow, MonthRow } from './types';
+import type { Amounts, CostSource, MaterialRow, MonthRow } from './types';
 
 /** actual = 마감월 CO-PA 실적, fcst = 진행 중인 달 예상 */
 export type MonthKind = 'actual' | 'fcst';
@@ -10,8 +10,7 @@ export interface TrendMonth {
   kind: MonthKind;
   filled: number; // 장려금·일반비를 입력한 채널(고객그룹3) 수
   chTotal: number; // 그 달 매출이 있는 채널 수
-  ledger?: boolean; // 장려금·일반비를 SAP 원장 실적으로 채운 달
-  sga?: 'actual' | 'fcst'; // 장려금·일반비를 판관비 대시보드 실적(actual)·비율 예측(fcst)으로 채운 달
+  source?: CostSource; // 장려금·일반비 원천 (판관비 연동·수기·원장)
   costEst?: boolean; // 원가 결산 전이라 추정 원가를 넣은 달
 }
 

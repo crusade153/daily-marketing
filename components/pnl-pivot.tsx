@@ -19,13 +19,14 @@ export const PIVOT_LABEL: Partial<Record<Axis, string>> = {
   category: '제품라인',
   name: '제품',
   ch: '채널(고객그룹3)',
+  sg: '영업그룹',
   l1: '브랜드',
   rep: '영업담당자',
 };
 
 const MODES: Record<PivotMode, { axes: Axis[]; depth: number; presets: { label: string; slots: Slot[] }[] }> = {
   product: {
-    axes: ['cm', 'owner', 'category', 'name', 'ch', 'l1'],
+    axes: ['cm', 'owner', 'category', 'name', 'ch', 'sg', 'l1'],
     depth: 6,
     presets: [
       { label: 'CM › PM › 제품라인 › 제품', slots: ['cm', 'owner', 'category', 'name', 'none', 'none'] },
@@ -35,11 +36,13 @@ const MODES: Record<PivotMode, { axes: Axis[]; depth: number; presets: { label: 
     ],
   },
   channel: {
-    axes: ['rep', 'ch', 'name', 'cm', 'l1'],
+    axes: ['rep', 'ch', 'sg', 'name', 'cm', 'l1'],
     depth: 4,
     presets: [
       { label: '영업담당자 › 채널 › 제품', slots: ['rep', 'ch', 'name', 'none'] },
       { label: '채널 › 제품', slots: ['ch', 'name', 'none', 'none'] },
+      { label: '영업그룹 › 제품', slots: ['sg', 'name', 'none', 'none'] },
+      { label: '영업그룹 › 채널 › 제품', slots: ['sg', 'ch', 'name', 'none'] },
       { label: '영업담당자 › 채널 › CM › 제품', slots: ['rep', 'ch', 'cm', 'name'] },
     ],
   },
@@ -209,7 +212,7 @@ export default function PnlPivot({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return rows;
-    return rows.filter((r) => [r.name, r.matnr, r.l1t, r.cm, r.category, r.owner, r.cht, r.rep].some((v) => v.toLowerCase().includes(q)));
+    return rows.filter((r) => [r.name, r.matnr, r.l1t, r.cm, r.category, r.owner, r.cht, r.sgt, r.rep].some((v) => v.toLowerCase().includes(q)));
   }, [rows, query]);
 
   // 고른 기간의 '전월': 누계·예상은 전월 실적, 전월 실적 보기는 전전월 실적
@@ -293,7 +296,7 @@ export default function PnlPivot({
   const onSort = (by: SortBy) => setSort((s) => (s.by === by ? { by, asc: !s.asc } : { by, asc: false }));
   const presetIndex = cfg.presets.findIndex((p) => p.slots.every((s, i) => s === slots[i]));
   /** depth 단계까지 채널로 나뉘었는가 (목표는 제품 단위라 채널 아래에서는 없음) */
-  const splitAt = (depth: number) => path.slice(0, depth + 1).includes('ch');
+  const splitAt = (depth: number) => path.slice(0, depth + 1).some((a) => a === 'ch' || a === 'sg');
 
   const resetDrill = () => {
     setOpen(new Set());

@@ -1,3 +1,4 @@
+import { sourceText } from '@/lib/cost-source';
 import { growth, mil, pct, ppt, signedMil, tone } from '@/lib/format';
 import { metrics, type Metrics } from '@/lib/pnl';
 import { monthLabel } from '@/lib/period';
@@ -73,7 +74,7 @@ export default function PnlStatement({
         </tbody>
       </table>
       </div>
-      <div className="panel-footer"><span>{inputStatus.curFilled < inputStatus.chTotal ? `장려금·일반비 ${inputStatus.curFilled}/${inputStatus.chTotal}개 채널 반영` : '장려금·일반비 입력 완료'}</span><span>전월 대비: 월 전체 기준</span></div>
+      <div className="panel-footer"><span>{sourceText(inputStatus.cur, inputStatus.sgTotal, inputStatus.chTotal)}</span><span>전월 대비: 월 전체 기준</span></div>
     </section>
   );
 }

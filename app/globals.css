@@ -104,6 +104,10 @@ a.month-step:hover { background: var(--accent-soft); color: var(--accent); }
 .notice-alert { color: var(--neg); }
 .notice-label { font-weight: 700; padding-right: 12px; border-right: 1px solid #e3d4b5; }
 .notice-action { margin-left: auto; font-weight: 700; white-space: nowrap; }
+.notice-toggle { background: none; border-top: 0; border-bottom: 0; border-left: 0; color: inherit; font: inherit; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.notice-toggle:hover { color: #5c4214; }
+.notice-count { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: #f0e3c5; font-size: 11px; text-align: center; }
+.notice-bar.is-collapsed { padding-top: 6px; padding-bottom: 6px; }
 .kpi-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; }
 .kpi-card { padding: 15px 18px 12px; position: relative; }
 .kpi-primary { border-top: 3px solid var(--accent) !important; padding-top: 13px; }

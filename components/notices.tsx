@@ -1,54 +1,72 @@
-import { Fragment } from 'react';
 import Link from 'next/link';
+import NoticeToggle from './notice-toggle';
+import { costMissing, manualText, SOURCE_LABEL } from '@/lib/cost-source';
 import { eok, pct } from '@/lib/format';
 import { monthLabel } from '@/lib/period';
-import type { DashboardData } from '@/lib/types';
+import type { DashboardData, MonthInputStatus } from '@/lib/types';
 
+/** 확인 사항 막대. 접고 펼 수 있고(NoticeToggle), 접혀 있어도 경고 한 줄은 보인다 */
 export default function Notices({ d }: { d: DashboardData }) {
   const { unitSales, rateSales, noneSales } = d.coverage;
   const total = unitSales + rateSales + noneSales;
-  const { chTotal, curFilled, prevFilled } = d.inputStatus;
-  // 원장으로 채운 달은 매출 있는 채널 전체에 배부됐으므로 입력 완료로 본다
-  const prevLedger = d.ledgerYms.includes(d.prevYm);
-  // 판관비 대시보드로 채운 달(실적·예측)도 매출 있는 채널 전체에 들어가므로 입력 완료로 본다
-  const linked = (ym: string) => d.sgaYms.includes(ym) || d.sgaFcstYms.includes(ym);
-  const curLinked = linked(d.curYm);
-  const prevAuto = prevLedger || linked(d.prevYm);
-  const missing = (!curLinked && curFilled < chTotal) || (!prevAuto && prevFilled < chTotal);
-  const sgaMonths = [d.prevYm, d.curYm].filter(linked);
+  const { chTotal, sgTotal } = d.inputStatus;
   const replacement = total > 0 && rateSales + noneSales !== 0;
   const basis = d.costYms.length ? `${monthLabel(d.costYms[0])}~${monthLabel(d.costYms[d.costYms.length - 1])}` : '';
   const prevOpen = d.costOpen.includes(d.prevYm);
   const curOpen = d.costOpen.includes(d.curYm);
+  const months: [string, MonthInputStatus][] = [
+    [d.prevYm, d.inputStatus.prev],
+    [d.curYm, d.inputStatus.cur],
+  ];
+  const needInput = months.some(([, s]) => s.source === 'none' || (s.source === 'manual' && (s.sg < sgTotal || s.ch < chTotal)));
+  const link = d.sgaLink;
+
+  const items: React.ReactNode[] = [
+    <span key="food" title="판매조직 1000 중 고객 영업그룹 오드그로서(300)·미식마켓(310)·FBH(320) 매출을 뺍니다. 판관비 대시보드의 식품 매출 모집단과 같고, 연동한 장려금·판관비도 식품만입니다.">
+      매출 <b>식품</b> (오드그로서·미식마켓·FBH 제외)
+    </span>,
+    // 원가 기준월은 항상 보여 준다: 결산 전인 달은 평균에서 빠지므로 달마다 바뀔 수 있다
+    <span key="cost">{monthLabel(d.curYm)} 원가 <b>{basis} 평균 단위원가</b></span>,
+  ];
+  if (d.costOpen.length > 0)
+    items.push(
+      <span key="open" className="notice-alert" title="CO-PA 실제원가가 그 달 매출의 절반에 못 미치면 원가 결산 전으로 봅니다 (결산 전 1% 안팎, 결산 후 100% 안팎)">
+        <b>{d.costOpen.map(monthLabel).join('·')} 원가 결산 전</b>
+        {prevOpen && ` · ${monthLabel(d.prevYm)} 실적 원가는 ${basis} 평균으로 추정`}
+        {curOpen && ` · ${monthLabel(d.curYm)}은 ${basis} 평균으로 추정`}
+      </span>,
+    );
+  items.push(
+    <span
+      key="src"
+      title={`판관비 대시보드 연동: ${link.lastYm ? `올해 1월~${monthLabel(link.lastYm)}` : '없음'} (마지막 마감 ${link.lastClosed ? monthLabel(link.lastClosed) : '없음'}, ${link.generatedAt.slice(0, 10)} 내보내기). 연동한 달의 일반비는 판관비 전체(인건비 포함)입니다. 그 뒤의 달은 장려금을 영업그룹, 일반비를 고객그룹3으로 수기 입력하고 각 묶음 안에서 제품 매출 비중으로 배부합니다.`}
+    >
+      장려금·일반비{' '}
+      {months.map(([ym, s], i) => (
+        <span key={ym} className={costMissing(s) ? 'notice-alert' : undefined}>
+          {i > 0 && ' · '}
+          {monthLabel(ym)} <b>{SOURCE_LABEL[s.source]}</b>
+          {s.source === 'manual' && ` (${manualText(s, sgTotal, chTotal)})`}
+        </span>
+      ))}
+    </span>,
+  );
+  if (replacement) items.push(<span key="rate">원가율 대체 적용 <b>{pct((rateSales + noneSales) / total)}</b> ({eok(rateSales + noneSales)})</span>);
+  if (d.storage === 'local') items.push(<span key="local">입력값은 현재 개발 환경에 저장됩니다.</span>);
+  if (needInput)
+    items.push(
+      <Link key="go" href="/input" prefetch={false} className="notice-action">
+        비용 입력 →
+      </Link>,
+    );
+
+  // 접혀 있을 때 보일 경고: 원가 결산 전, 비용 없는 달
+  const missing = months.filter(([, s]) => costMissing(s)).map(([ym]) => monthLabel(ym));
+  const alert = [d.costOpen.length ? `${d.costOpen.map(monthLabel).join('·')} 원가 결산 전` : '', missing.length ? `${missing.join('·')} 장려금·일반비 미입력` : ''].filter(Boolean).join(' · ') || null;
+
   return (
-    <div className="notice-bar" role="note" aria-label="데이터 확인 사항">
-      <span className="notice-label">확인 사항</span>
-      <span title="판매조직 1000 중 고객 영업그룹 오드그로서(300)·미식마켓(310)·FBH(320) 매출을 뺍니다. 판관비 대시보드의 식품 매출 모집단과 같고, 연동한 장려금·판관비도 식품만입니다.">
-        매출 <b>식품</b> (오드그로서·미식마켓·FBH 제외)
-      </span>
-      {/* 원가 기준월은 항상 보여 준다: 결산 전인 달은 평균에서 빠지므로 달마다 바뀔 수 있다 */}
-      <span>{monthLabel(d.curYm)} 원가 <b>{basis} 평균 단위원가</b></span>
-      {d.costOpen.length > 0 && (
-        <span className="notice-alert" title="CO-PA 실제원가가 그 달 매출의 절반에 못 미치면 원가 결산 전으로 봅니다 (결산 전 1% 안팎, 결산 후 100% 안팎)">
-          <b>{d.costOpen.map(monthLabel).join('·')} 원가 결산 전</b>
-          {prevOpen && ` · ${monthLabel(d.prevYm)} 실적 원가는 ${basis} 평균으로 추정`}
-          {curOpen && ` · ${monthLabel(d.curYm)}은 ${basis} 평균으로 추정`}
-        </span>
-      )}
-      {missing && <span>장려금·일반비 입력 <b>{monthLabel(d.curYm)} {curFilled}/{chTotal}</b>{prevAuto ? '개 채널' : <> · {monthLabel(d.prevYm)} {prevFilled}/{chTotal}개 채널</>}</span>}
-      {sgaMonths.length > 0 && (
-        <span title={`판관비 대시보드 배부 결과를 고객그룹3별로 가져옵니다. 마감월은 장려금·판관비(인건비 포함 전체) 실적, 마감 전인 달은 직전 마감 3개월의 채널별 장려금률·판관비율로 예측합니다. 수기 입력이 있는 달은 수기 입력을 씁니다. 연동 파일 ${d.sgaLink.generatedAt.slice(0, 10)} 기준, 마지막 마감 ${d.sgaLink.lastClosed ? monthLabel(d.sgaLink.lastClosed) : '없음'}`}>
-          장려금·일반비{' '}
-          {sgaMonths.map((ym, i) => (
-            <Fragment key={ym}>{i > 0 && ' · '}<b>{monthLabel(ym)} {d.sgaYms.includes(ym) ? '판관비 실적' : '판관비 예측'}</b></Fragment>
-          ))}
-          {d.sgaFcstYms.length > 0 && d.sgaLink.lastClosed && ` (${monthLabel(d.sgaLink.lastClosed)}까지 3개월 비율)`}
-        </span>
-      )}
-      {prevLedger && <span title="수기 입력이 없는 마감월은 회계원장 매출조정(41xx)을 장려금으로, 물류비·광고판촉비·수수료(61xx)를 일반비로 넣고 채널·제품 총매출 비중으로 배부합니다">{monthLabel(d.prevYm)} 장려금·일반비 <b>SAP 원장 실적</b> (매출 비중 배부)</span>}
-      {replacement && <span>원가율 대체 적용 <b>{pct((rateSales + noneSales) / total)}</b> ({eok(rateSales + noneSales)})</span>}
-      {d.storage === 'local' && <span>입력값은 현재 개발 환경에 저장됩니다.</span>}
-      {missing && <Link href="/input" prefetch={false} className="notice-action">비용 입력 →</Link>}
-    </div>
+    <NoticeToggle count={items.length - (needInput ? 1 : 0)} alert={alert}>
+      {items}
+    </NoticeToggle>
   );
 }
