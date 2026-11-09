@@ -45,7 +45,7 @@ export default async function SummaryPage({
               .filter((g) => g.fcst.sales || g.fcst.cogs)
               .map((g) => {
                 const m = metrics(g.fcst);
-                return { key: g.key, label: g.label, sales: m.sales, gp: m.gp, gpm: m.gpm };
+                return { key: g.key, label: g.label, sales: m.sales, gp: m.gp, gpm: m.gpm, op: m.op, opm: m.opm };
               }),
           }))} />
           </div>
