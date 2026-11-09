@@ -545,7 +545,7 @@ async function readSgaLink(): Promise<SgaLink> {
   const rows = await getStore().read(TABS.sgaLink);
   return linkFromRows(rows.map(({ values: v }): SgaLinkRow => [toStr(v[0]), toStr(v[1]), toNum(v[2]), toNum(v[3]), toNum(v[4]), toStr(v[5]), toStr(v[6])]));
 }
-export const getSgaLink = unstable_cache(readSgaLink, ['sga-link-v2'], { revalidate: 3600, tags: ['manual'] });
+export const getSgaLink = unstable_cache(readSgaLink, ['sga-link-v2'], { revalidate: 300, tags: ['manual'] }); // 다시 올린 판관비 데이터가 5분 안에 보이게 (다른 시트 데이터와 같은 주기)
 
 /**
  * 손익 계산에 쓰는 장려금·일반비. 달마다 원천 하나만 쓴다 (섞으면 어디까지가 어느 값인지 알 수 없다):
