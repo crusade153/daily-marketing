@@ -8,6 +8,8 @@ import type { PlanLv3 } from './plan';
 import { MOMENTUM_AXES, momentum, opBridge, whaleCurve, type InsightData, type InsightPair } from './insight';
 import { buildLedger, GENERAL_ITEMS, ledgerInputs, type GlMonthCost, type GlRow, type Ledger, type LedgerMonth } from './ledger';
 import { buildPriceTrend, type PriceItem, type PriceTrend } from './price';
+import { incentiveGroups, recordsToInputs } from './incentive';
+import { getIncentiveSheet } from './incentive-sheet';
 import { getStore, storageKind, TABS, type Cell } from './sheets';
 import { SEG_PERIODS, type SegAmounts, type SegPeriod, type SegProduct } from './segment';
 import { aggregateTrend, toMonthRows, type MonthBlock, type TrendData } from './trend';
@@ -588,7 +590,8 @@ function withChannelCosts(manual: ChannelInput[], gl: GlMonthCost[], chFacts: Ma
 /** 그 달 수기 입력 현황: 장려금 입력 영업그룹 수, 일반비 입력 고객그룹3 수 */
 function monthInput(manual: ChannelInput[], source: Record<string, CostSource>, ym: string): MonthInputStatus {
   const mine = manual.filter((i) => i.ym === ym);
-  return { source: source[ym] ?? 'none', sg: mine.filter((i) => i.by === 'sg' && i.incentive).length, ch: mine.filter((i) => i.by !== 'sg' && i.general).length };
+  const sgs = new Set(mine.filter((i) => (i.by === 'sg' || i.by === 'cell') && i.incentive).map((i) => (i.by === 'cell' ? i.sg : i.ch)));
+  return { source: source[ym] ?? 'none', sg: sgs.size, ch: mine.filter((i) => i.by === 'ch' && i.general).length };
 }
 
 /** 연동 원천 정보 (화면 안내용) */
@@ -618,13 +621,29 @@ export async function getFacts(today?: string) {
 
 const filledCount = (inputs: ChannelInput[], ym: string) => inputs.filter((i) => i.ym === ym && (i.incentive || i.general || i.rate)).length;
 
-/** 손익 계산용 수기 입력: 고객그룹3 일반비(금액) + 영업그룹 장려금. 예전 고객그룹3 장려금·변동비율 열은 쓰지 않는다 */
+/**
+ * 손익 계산용 수기 입력: 고객그룹3 일반비(금액) + 장려금. 예전 고객그룹3 장려금·변동비율 열은 쓰지 않는다.
+ * 장려금은 장려금 시트(영업그룹 × 고객그룹3 × 카테고리)가 우선 — 그 달 시트에 금액이 있으면 영업그룹 총액(manual_input_sg)은 버린다
+ */
 async function getManualCosts(): Promise<ChannelInput[]> {
-  const [chs, sgs] = await Promise.all([getChannelInputs(), getSgInputs()]);
+  const [chs, sgs, sheet] = await Promise.all([getChannelInputs(), getSgInputs(), getIncentiveSheet()]);
+  const cells = recordsToInputs(sheet.records);
+  const sheetYms = new Set(cells.map((c) => c.ym));
   return [
     ...chs.filter((c) => c.general).map((c) => ({ ...c, by: 'ch' as const, incentive: 0, rate: 0 })),
-    ...sgs.filter((s) => s.incentive),
+    ...sgs.filter((s) => s.incentive && !sheetYms.has(s.ym)),
+    ...cells,
   ];
+}
+
+/** 장려금 시트에 깔 조합: 올해(1월 ~ 당월) 매출이 있는 영업그룹 × 고객그룹3 × 카테고리 */
+export async function getIncentiveGroups(today?: string) {
+  const p = getPeriods(today);
+  const [facts, maps] = await Promise.all([getChannelFacts(p.today), getEffectiveMap()]);
+  const cat = new Map(maps.map((m) => [m.matnr, m.category]));
+  const year = yearStartOf(p.curYm);
+  const list = [...facts].filter(([ym]) => ym >= year && ym <= p.curYm).flatMap(([, l]) => l);
+  return incentiveGroups(list, (m) => cat.get(m) ?? '');
 }
 const channelCount = (rows: { ch: string; name: string }[], sales: (r: { ch: string; name: string }) => number) =>
   new Set(rows.filter((r) => r.name !== ORPHAN_NAME && sales(r)).map((r) => r.ch)).size;

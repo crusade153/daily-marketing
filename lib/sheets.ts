@@ -49,12 +49,17 @@ const TITLES_TTL = 60_000;
 
 const colLetter = (n: number) => String.fromCharCode(64 + n); // 헤더가 8열 이하라 A~Z면 충분
 
-function sheetsStore(spreadsheetId: string): Store {
+/** 서비스계정 시트 API (운영 시트·장려금 시트 공용) */
+export function sheetsClient(): sheets_v4.Sheets {
   const email = process.env.SHEETS_CLIENT_EMAIL ?? process.env.GOOGLE_CLIENT_EMAIL;
   const key = (process.env.SHEETS_PRIVATE_KEY ?? process.env.GOOGLE_PRIVATE_KEY ?? '').replace(/\\n/g, '\n');
   if (!email || !key) throw new Error('시트 서비스계정 자격증명이 없습니다.');
   const auth = new google.auth.JWT({ email, key, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
-  const api: sheets_v4.Sheets = google.sheets({ version: 'v4', auth });
+  return google.sheets({ version: 'v4', auth });
+}
+
+function sheetsStore(spreadsheetId: string): Store {
+  const api = sheetsClient();
   // 시트 읽기 한도(분당 60회)를 넘지 않도록: 탭 목록은 프로세스당 한 번, 같은 탭을 동시에 읽으면 요청 하나를 공유한다
   const ensured = new Map<string, Promise<void>>();
   const inflight = new Map<string, Promise<SheetRow[]>>();

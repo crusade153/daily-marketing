@@ -1,7 +1,10 @@
 import Link from 'next/link';
 import AmountGrid, { type AmountItem, type SavedAmount } from '@/components/amount-grid';
 import TargetPanel, { type TargetMonthStatus } from '@/components/target-panel';
-import { getChannelInputs, getChannelTotals, getMonthBlocks, getPlans, getSgaLink, getSgInputs, getTargets } from '@/lib/data';
+import IncentivePanel, { type IncentiveGroupStatus } from '@/components/incentive-panel';
+import { summarize } from '@/lib/incentive';
+import { getIncentiveSheet, incentiveSheetUrl } from '@/lib/incentive-sheet';
+import { getChannelInputs, getChannelTotals, getIncentiveGroups, getMonthBlocks, getPlans, getSgaLink, getTargets } from '@/lib/data';
 import { l1Of, l2Of } from '@/lib/plan';
 import { forecastFactor, ORPHAN_NAME } from '@/lib/pnl';
 import { monthLabel, shiftYm, yearStartOf, ymRange } from '@/lib/period';
@@ -10,7 +13,7 @@ export const dynamic = 'force-dynamic';
 
 type Tab = 'incentive' | 'general' | 'target' | 'plan';
 const TABS: { id: Tab; href: string; label: string }[] = [
-  { id: 'incentive', href: '/input', label: '장려금 · 영업그룹' },
+  { id: 'incentive', href: '/input', label: '장려금 · 시트' },
   { id: 'general', href: '/input?tab=general', label: '일반비 · 고객그룹3' },
   { id: 'plan', href: '/input?tab=plan', label: '판매계획 · LV3' },
   { id: 'target', href: '/input?tab=target', label: '목표 · 제품' },
@@ -31,9 +34,48 @@ export default async function InputPage({
 
   let body: React.ReactNode;
   let intro: React.ReactNode;
-  if (tab === 'incentive' || tab === 'general') {
+  if (tab === 'incentive') {
+    // 장려금: 별도 구글 시트(영업그룹 탭 × 고객그룹3 × 카테고리)에서 입력. 판관비 연동 달 다음 달부터
+    const [link, totals, groups, sheet] = await Promise.all([getSgaLink(), getChannelTotals(), getIncentiveGroups(), getIncentiveSheet()]);
+    const lastLinked = link.months.at(-1)?.ym ?? '';
+    const yearEnd = `${d.curYm.slice(0, 4)}12`;
+    const months = ymRange(yearStartOf(d.curYm), yearEnd).filter((ym) => ym > lastLinked);
+    const k = forecastFactor(d.progress.elapsed, d.progress.daysInMonth);
+    const salesOf = new Map(totals.groups.map((g) => [g.code, g.sales]));
+    const refSales = (sg: string, ym: string) => {
+      const s = salesOf.get(sg) ?? {};
+      if (ym === d.curYm) return (s[ym] ?? 0) * k;
+      return s[ym] ?? (s[d.curYm] ?? 0) * k; // 미래 달은 당월 월말 예상
+    };
+    const status: Record<string, IncentiveGroupStatus[]> = {};
+    for (const ym of months) {
+      const sum = new Map(summarize(sheet.records, ym).map((x) => [x.sg, x]));
+      const list: IncentiveGroupStatus[] = groups.map((g) => {
+        const x = sum.get(g.sg);
+        sum.delete(g.sg);
+        return { sg: g.sg, sgt: g.sgt, cells: g.cells.length, sales: refSales(g.sg, ym), rows: x?.rows ?? 0, filled: x?.filled ?? 0, total: x?.total ?? 0 };
+      });
+      for (const x of sum.values()) list.push({ sg: x.sg, sgt: x.sgt, cells: 0, sales: refSales(x.sg, ym), rows: x.rows, filled: x.filled, total: x.total });
+      status[ym] = list;
+    }
+    intro = (
+      <>
+        장려금은 장려금 구글 시트에서 영업그룹 탭마다 고객그룹 × 카테고리(제품라인)별 10개 항목 금액을 입력하고, 그 칸의 제품별 매출 비중으로 배부합니다. 입력 금액은 월 전체 금액이며 누계 손익에는 월 진행률만큼 반영합니다.{' '}
+        {link.months.length ? (
+          <>
+            <b>{`${monthLabel(link.months[0].ym)}~${monthLabel(lastLinked)}`}</b>은 판관비 대시보드 연동 데이터를 쓰므로 입력하지 않습니다.
+          </>
+        ) : null}
+      </>
+    );
+    body = months.length ? (
+      <IncentivePanel months={months} curYm={d.curYm} status={status} sheetUrl={incentiveSheetUrl()} sheetError={sheet.error} />
+    ) : (
+      <p className="card px-4 py-3 text-sm">입력할 달이 없습니다. 모든 달이 판관비 대시보드 연동 데이터로 채워져 있습니다.</p>
+    );
+  } else if (tab === 'general') {
     // 판관비 대시보드 연동 달(올해 1월 ~ 내보낸 마지막 달)은 연동 데이터를 쓰므로 그 뒤의 달만 입력한다
-    const [link, totals, saved] = await Promise.all([getSgaLink(), getChannelTotals(), tab === 'incentive' ? getSgInputs() : getChannelInputs()]);
+    const [link, totals, saved] = await Promise.all([getSgaLink(), getChannelTotals(), getChannelInputs()]);
     const lastLinked = link.months.at(-1)?.ym ?? '';
     const months = blocks.map((b) => b.ym).filter((ym) => ym > lastLinked);
     // 참고 매출: 마감월은 실적, 당월은 월말 예상 (입력 금액이 월 전체 금액이라 같은 기준으로 비율을 본다)
@@ -43,10 +85,10 @@ export default async function InputPage({
       label: t.name,
       ref: Object.fromEntries(Object.entries(t.sales).map(([ym, v]) => [ym, ym === d.curYm ? v * k : v])),
     });
-    const list = (tab === 'incentive' ? totals.groups : totals.channels).map(toItem);
+    const list = totals.channels.map(toItem);
     for (const s of saved) if (!list.some((it) => it.key === s.ch)) list.push({ key: s.ch, label: s.cht || s.ch, ref: {} });
-    const amounts: SavedAmount[] = saved.map((s) => ({ ym: s.ym, key: s.ch, amount: tab === 'incentive' ? s.incentive : s.general, updatedAt: s.updatedAt, updatedBy: s.updatedBy }));
-    const what = tab === 'incentive' ? '장려금은 영업그룹별 월 금액을 입력하고, 그 영업그룹 안에서 제품별 매출 비중으로 배부합니다' : '일반비는 고객그룹3별 월 금액을 입력하고, 그 고객그룹3 안에서 제품별 매출 비중으로 배부합니다';
+    const amounts: SavedAmount[] = saved.map((s) => ({ ym: s.ym, key: s.ch, amount: s.general, updatedAt: s.updatedAt, updatedBy: s.updatedBy }));
+    const what = '일반비는 고객그룹3별 월 금액을 입력하고, 그 고객그룹3 안에서 제품별 매출 비중으로 배부합니다';
     intro = (
       <>
         {what}. 입력 금액은 월 전체 금액이며 누계 손익에는 월 진행률만큼 반영합니다.{' '}
@@ -57,9 +99,9 @@ export default async function InputPage({
     body = months.length ? (
       <AmountGrid
         key={tab}
-        kind={tab === 'incentive' ? 'sg' : 'ch'}
-        rowName={tab === 'incentive' ? '영업그룹' : '고객그룹3'}
-        fieldLabel={tab === 'incentive' ? '장려금' : '일반비'}
+        kind="ch"
+        rowName="고객그룹3"
+        fieldLabel="일반비"
         refLabel="매출 (당월은 월말 예상)"
         items={list.sort(bySales)}
         saved={amounts}

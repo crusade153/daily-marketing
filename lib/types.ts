@@ -105,13 +105,18 @@ export interface ChannelOwner {
  * 장려금·일반비 배부 단위 입력: 월 × 고객그룹3(by 'ch', 기본) 또는 영업그룹(by 'sg').
  * 금액 = 월 전체 금액(원), 그 채널(영업그룹) 제품 총매출 비중으로 배부. 변동비율 = 총매출 대비 % (판관비 연동 전 수기 입력의 흔적, 지금은 0)
  *   수기 입력: 장려금 = 영업그룹, 일반비 = 고객그룹3 (2026-11-09 사용자 결정)
+ *   장려금 시트(by 'cell'): 영업그룹 × 고객그룹3 × 카테고리(제품라인) 한 칸 (2026-11-15, lib/incentive.ts)
  */
 export interface ChannelInput {
   ym: string;
-  /** 배부 기준: ch = 고객그룹3, sg = 영업그룹. 없으면 ch */
-  by?: 'ch' | 'sg';
-  ch: string; // by에 따라 KVGR3 또는 VKGRP 코드
+  /** 배부 기준: ch = 고객그룹3, sg = 영업그룹, cell = 영업그룹 × 고객그룹3 × 카테고리. 없으면 ch */
+  by?: 'ch' | 'sg' | 'cell';
+  ch: string; // by에 따라 KVGR3 또는 VKGRP 코드 (cell이면 KVGR3)
   cht: string; // 그 이름
+  /** by 'cell'만: 영업그룹 코드·이름, 카테고리(product_map 카테고리, 없으면 (미매핑)) */
+  sg?: string;
+  sgt?: string;
+  cat?: string;
   incentive: number;
   general: number; // 일반비 고정비 (금액)
   rate: number; // 일반비 변동비율 (%, 예: 3.5 = 총매출의 3.5%)

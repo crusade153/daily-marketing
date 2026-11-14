@@ -4,6 +4,8 @@ import { updateTag } from 'next/cache';
 import { z } from 'zod';
 import { getSession } from '@/lib/session';
 import { getStore, TABS, type Cell, type SheetRow } from '@/lib/sheets';
+import { getIncentiveGroups } from '@/lib/data';
+import { writeIncentiveRows } from '@/lib/incentive-sheet';
 
 const Amount = z.number().finite().min(-1e13).max(1e13);
 
@@ -201,6 +203,24 @@ export async function appendUnmappedProducts(input: unknown): Promise<SaveResult
   } catch (e) {
     console.error('appendUnmappedProducts', e);
     return { ok: false, error: `추가 실패: ${(e as Error).message}` };
+  }
+}
+
+/**
+ * 장려금 시트에 그 달 입력 행을 만든다: 영업그룹마다 탭, 올해 매출이 있는 고객그룹3 × 카테고리 행.
+ * 이미 있는 행은 건너뛴다 (금액은 건드리지 않는다)
+ */
+export async function createIncentiveRows(input: unknown): Promise<SaveResult & { tabs?: number }> {
+  if (!(await getSession())) return NO_SESSION;
+  const parsed = z.object({ ym: z.string().regex(/^\d{6}$/) }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: '입력값 형식이 올바르지 않습니다.' };
+  try {
+    const groups = await getIncentiveGroups();
+    const { tabs, rows } = await writeIncentiveRows(parsed.data.ym, groups);
+    updateTag('manual');
+    return { ok: true, updated: 0, appended: rows, tabs };
+  } catch (e) {
+    return fail('createIncentiveRows', e);
   }
 }
 

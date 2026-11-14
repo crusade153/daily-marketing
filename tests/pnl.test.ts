@@ -413,3 +413,71 @@ test('매출 없는 영업그룹 장려금은 영업그룹 비용 행으로', ()
   assert.equal(orphan.sg, 'S9');
   assert.equal(orphan.sgt, '수출');
 });
+
+// ── 장려금 시트 칸(영업그룹 × 고객그룹3 × 카테고리) 배부 ──
+const pmc = (matnr: string, category: string): ProductMap => ({ matnr, name: matnr, cm1: '', cm2: '', cm3: '', etc: '', category, owner: '' });
+const cell = (sg: string, ch: string, cat: string, incentive: number): ChannelInput => ({
+  ym: '202611',
+  by: 'cell',
+  ch,
+  cht: `채널${ch}`,
+  sg,
+  sgt: `영업그룹${sg}`,
+  cat,
+  incentive,
+  general: 0,
+  rate: 0,
+  updatedAt: '',
+  updatedBy: '',
+});
+
+test('장려금 시트 칸은 그 영업그룹 × 고객그룹3 × 카테고리 제품에만 매출 비중으로', () => {
+  const rows = buildMonthRows({
+    facts: [cf('a', 'E', 300, 0, 0, 'S1'), cf('b', 'E', 100, 0, 0, 'S1'), cf('c', 'E', 500, 0, 0, 'S1'), cf('a', 'E', 900, 0, 0, 'S2'), cf('a', 'F', 700, 0, 0, 'S1')],
+    dims: new Map(),
+    maps: [pmc('a', '면'), pmc('b', '면'), pmc('c', '즉석밥')],
+    reps: new Map(),
+    inputs: [cell('S1', 'E', '면', 40)],
+  });
+  const at = (m: string, ch: string, sg: string) => rows.find((r) => r.matnr === m && r.ch === ch && r.sg === sg)!.amt.incentive;
+  assert.equal(at('a', 'E', 'S1'), 30);
+  assert.equal(at('b', 'E', 'S1'), 10);
+  assert.equal(at('c', 'E', 'S1'), 0); // 다른 카테고리
+  assert.equal(at('a', 'E', 'S2'), 0); // 다른 영업그룹
+  assert.equal(at('a', 'F', 'S1'), 0); // 다른 고객그룹3
+});
+
+test('칸에 매출이 없으면 영업그룹 × 고객그룹3 → 영업그룹 → 보관 행 순으로 넓힌다', () => {
+  const facts = [cf('c', 'E', 100, 0, 0, 'S1'), cf('d', 'E', 300, 0, 0, 'S1'), cf('a', 'F', 200, 0, 0, 'S1')];
+  const maps = [pmc('a', '면'), pmc('c', '즉석밥'), pmc('d', '소스')];
+  const rows = buildMonthRows({
+    facts,
+    dims: new Map(),
+    maps,
+    reps: new Map(),
+    inputs: [cell('S1', 'E', '면', 40), cell('S1', 'G', '면', 20), cell('S9', 'E', '면', 7)],
+  });
+  const at = (m: string, ch: string) => rows.find((r) => r.matnr === m && r.ch === ch)!.amt.incentive;
+  // 40: S1 × E 안 매출 100 : 300 / 20: 고객그룹 G 매출 없음 → S1 전체 100 : 300 : 200
+  const near = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-9, `${a} ≈ ${b}`);
+  near(at('c', 'E'), 10 + 20 * (100 / 600));
+  near(at('d', 'E'), 30 + 20 * (300 / 600));
+  near(at('a', 'F'), 20 * (200 / 600));
+  const orphan = rows.find((r) => r.matnr === 'SG:S9|E')!;
+  assert.equal(orphan.name, ORPHAN_NAME);
+  assert.equal(orphan.amt.incentive, 7);
+  assert.equal(orphan.sg, 'S9');
+  assert.equal(orphan.ch, 'E');
+});
+
+test('카테고리가 없는 제품은 (미매핑) 칸', () => {
+  const rows = buildMonthRows({
+    facts: [cf('x', 'E', 100), cf('a', 'E', 100)],
+    dims: new Map(),
+    maps: [pmc('a', '면')],
+    reps: new Map(),
+    inputs: [cell('S1', 'E', '(미매핑)', 50)],
+  });
+  assert.equal(rows.find((r) => r.matnr === 'x')!.amt.incentive, 50);
+  assert.equal(rows.find((r) => r.matnr === 'a')!.amt.incentive, 0);
+});

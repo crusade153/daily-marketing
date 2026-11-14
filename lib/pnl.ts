@@ -298,8 +298,38 @@ function dimsOf(f: ProductDims, m: ProductMap | undefined, ch: { ch: string; cht
   };
 }
 
-/** 채널(영업그룹) 비용 중 그 달 매출이 없어 제품에 붙일 수 없는 금액을 담는 행 (채널·영업그룹별 하나) */
-function channelOrphanDims(inp: Pick<ChannelInput, 'ch' | 'cht' | 'by'>, reps: Map<string, string>): RowDims {
+/**
+ * 채널(영업그룹) 비용 중 그 달 매출이 없어 제품에 붙일 수 없는 금액을 담는 행 (채널·영업그룹별 하나).
+ * 장려금 시트 칸(by 'cell')은 그 영업그룹 안에도 매출이 없을 때만 온다 → 영업그룹 × 고객그룹3 보관 행
+ */
+function channelOrphanDims(inp: Pick<ChannelInput, 'ch' | 'cht' | 'by' | 'sg' | 'sgt'>, reps: Map<string, string>): RowDims {
+  if (inp.by === 'cell') {
+    const sg = inp.sg ?? '-';
+    const sgt = inp.sgt || sg;
+    const code = `SG:${sg}|${inp.ch}`;
+    const label = `(영업그룹 비용) ${sgt}`;
+    return {
+      matnr: code,
+      name: ORPHAN_NAME,
+      l1: code,
+      l1t: label,
+      l2: code,
+      l2t: label,
+      l3: code,
+      l3t: label,
+      l4: code,
+      l4t: label,
+      cm: UNMAPPED,
+      cmMark: UNMAPPED,
+      category: UNMAPPED,
+      owner: UNMAPPED,
+      ch: inp.ch,
+      cht: inp.cht || inp.ch,
+      sg,
+      sgt,
+      rep: reps.get(inp.ch) || UNMAPPED,
+    };
+  }
   const bySg = inp.by === 'sg';
   const code = `${bySg ? 'SG' : 'CH'}:${inp.ch}`;
   const label = `(${bySg ? '영업그룹' : '채널'} 비용) ${inp.cht || inp.ch}`;
@@ -329,6 +359,8 @@ function channelOrphanDims(inp: Pick<ChannelInput, 'ch' | 'cht' | 'by'>, reps: M
 /**
  * 입력 금액(장려금·일반비)을 그 채널(by 'ch') 또는 영업그룹(by 'sg') 행들의 매출 비중으로 나눠 add로 넘긴다.
  * 매출이 없으면 extra의 채널·영업그룹별 보관 행으로. 변동비율은 그 묶음의 모든 행에 addRate(행, 비율)로 넘긴다.
+ * 장려금 시트(by 'cell')는 영업그룹 × 고객그룹3 × 카테고리 행들에 나누고, 그 칸에 매출이 없으면
+ * 영업그룹 × 고객그룹3 → 영업그룹 순으로 넓혀 나눈다 (월초처럼 누계 매출이 빈 칸 대비).
  */
 function spreadChannelInputs<R extends RowDims>(
   rows: R[],
@@ -340,26 +372,39 @@ function spreadChannelInputs<R extends RowDims>(
   make: (d: RowDims) => R,
   reps: Map<string, string>,
 ) {
-  const groups = { ch: new Map<string, R[]>(), sg: new Map<string, R[]>() };
+  const groups = { ch: new Map<string, R[]>(), sg: new Map<string, R[]>(), sgch: new Map<string, R[]>(), cell: new Map<string, R[]>() };
+  const keyOf = { ch: (r: R) => r.ch, sg: (r: R) => r.sg, sgch: (r: R) => `${r.sg}|${r.ch}`, cell: (r: R) => `${r.sg}|${r.ch}|${r.category}` };
   for (const r of rows) {
     if (r.name === ORPHAN_NAME) continue;
-    for (const by of ['ch', 'sg'] as const) {
-      const list = groups[by].get(r[by]);
+    for (const by of ['ch', 'sg', 'sgch', 'cell'] as const) {
+      const k = keyOf[by](r);
+      const list = groups[by].get(k);
       if (list) list.push(r);
-      else groups[by].set(r[by], [r]);
+      else groups[by].set(k, [r]);
     }
   }
   for (const inp of inputs) {
-    const list = groups[inp.by ?? 'ch'].get(inp.ch) ?? [];
+    // 배부 후보 묶음: cell은 칸 → 영업그룹×고객그룹3 → 영업그룹, 나머지는 하나
+    const tries =
+      inp.by === 'cell'
+        ? [groups.cell.get(`${inp.sg}|${inp.ch}|${inp.cat || UNMAPPED}`), groups.sgch.get(`${inp.sg}|${inp.ch}`), groups.sg.get(inp.sg ?? '')]
+        : [groups[inp.by ?? 'ch'].get(inp.ch)];
+    const list = tries[0] ?? [];
     if (inp.rate) for (const r of list) addRate(r, inp.rate / 100);
     if (!inp.incentive && !inp.general) continue;
-    const w = list.map(weight);
-    const inc = allocate(inp.incentive, w);
-    const gen = allocate(inp.general, w);
-    if (inc && gen) {
-      list.forEach((r, j) => add(r, inc[j], gen[j]));
-      continue;
+    let done = false;
+    for (const cand of tries) {
+      if (!cand) continue;
+      const w = cand.map(weight);
+      const inc = allocate(inp.incentive, w);
+      const gen = allocate(inp.general, w);
+      if (inc && gen) {
+        cand.forEach((r, j) => add(r, inc[j], gen[j]));
+        done = true;
+        break;
+      }
     }
+    if (done) continue;
     const d = channelOrphanDims(inp, reps);
     let r = extra.get(d.matnr);
     if (!r) {
