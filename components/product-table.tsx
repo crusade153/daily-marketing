@@ -7,6 +7,7 @@ import { metrics, unitPrice, type Metrics } from '@/lib/pnl';
 import { monthLabel, shiftYm } from '@/lib/period';
 import { GRADE_RANK } from '@/lib/segment';
 import { SCENARIO_LABEL, type MaterialRow, type Scenario } from '@/lib/types';
+import CompactToggle from './compact-toggle';
 import GradeAlert from './grade-alert';
 import { GradeShift } from './grade-chip';
 
@@ -265,6 +266,7 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
         <span className="ml-auto text-xs text-muted">
           {list.length.toLocaleString()}개 제품 · 금액 백만원, 단가 원/EA<span className="only-pc"> · 머리글을 누르면 정렬</span>
         </span>
+        <CompactToggle />
       </div>
       <div className="data-scroll only-pc">
         <table className="dtable product-dtable">

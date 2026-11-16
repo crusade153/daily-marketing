@@ -190,6 +190,24 @@ a.month-step:hover { background: var(--accent-soft); color: var(--accent); }
 .pivot-search { flex: 1; min-width: 150px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); padding: 5px 10px; }
 .pivot-export { border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .pivot-export:hover { background: var(--surface-2); }
+.compact-toggle { border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--muted); background: var(--surface); }
+.compact-toggle:hover { background: var(--surface-2); color: var(--text); }
+.compact-toggle[aria-pressed=true] { color: var(--accent); border-color: var(--accent); }
+/* 위 영역 접기 (PC): 페이지 설명·계산 기준·등급 신호등을 숨기고 제목·기준월을 한 줄로 → 표가 남는 높이를 다 쓴다 */
+@media (min-width: 761px) {
+  .data-page:has(.compact-toggle[aria-pressed=true]) { gap: 10px; }
+  .data-page:has(.compact-toggle[aria-pressed=true]) > .page-intro { display: flex; align-items: center; gap: 14px; }
+  .data-page:has(.compact-toggle[aria-pressed=true]) > .page-intro h1 { font-size: 20px; }
+  .data-page:has(.compact-toggle[aria-pressed=true]) > .page-intro .month-stepper { margin-top: 0; }
+  .data-page:has(.compact-toggle[aria-pressed=true]) > .page-intro > p,
+  .data-page:has(.compact-toggle[aria-pressed=true]) > .page-intro > .method-note,
+  .data-page:has(.compact-toggle[aria-pressed=true]) > .grade-alert { display: none; }
+}
+/* 위 영역을 펼쳤을 때: 표가 눌려 사라지지 않게 표 카드를 거의 한 화면 높이로 잡고 페이지를 스크롤한다 (접으면 표가 남은 높이를 다 쓴다) */
+@media (min-width: 1100px) {
+  .data-page:has(.compact-toggle[aria-pressed=false]) { height: auto; }
+  .data-page:has(.compact-toggle[aria-pressed=false]) > .card:last-child { flex: none; height: max(calc(100dvh - 110px), 420px); }
+}
 .pivot-dtable { font-size: 12.5px; }
 .pivot-dtable .pivot-name { width: 240px; min-width: 240px; max-width: 240px; position: sticky; left: 0; z-index: 2; background: var(--surface); box-shadow: 3px 0 4px #1b2d4608; }
 .pivot-dtable thead th.pivot-name { z-index: 4; background: var(--surface-2); vertical-align: bottom; overflow: hidden; text-overflow: ellipsis; }

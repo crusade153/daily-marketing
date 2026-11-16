@@ -5,6 +5,7 @@ import { growth, mil, pct, ppt, tone, won } from '@/lib/format';
 import { changeOf, gradeChanges, gradePair, gradeUnitKey, type GradeChange } from '@/lib/grade';
 import { axisKey, groupBy, metrics, priceChange, sortGroups, totalOf, unitPrice, type Axis, type Group, type Metrics } from '@/lib/pnl';
 import { monthLabel, shiftYm } from '@/lib/period';
+import CompactToggle from './compact-toggle';
 import GradeAlert from './grade-alert';
 import { GradeShift } from './grade-chip';
 import { SCENARIO_LABEL, type MaterialRow, type Scenario, type TargetMap } from '@/lib/types';
@@ -524,6 +525,7 @@ export default function PnlPivot({
               원천 다운로드
             </a>
           )}
+          <CompactToggle />
         </div>
         <div className="pivot-row only-pc">
           {slots.map((s, i) => (
