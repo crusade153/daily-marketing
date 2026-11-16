@@ -4,7 +4,8 @@ import { runQuery } from './bigquery';
 import { getPeriods, kstToday, monthEnd, monthLabel, progressOf, shiftYm, yearStartOf, ymRange, type Periods } from './period';
 import { applyCostBasis, applyLineOwners, buildMonthRows, buildRows, estimateFactsCogs, factsClosed, ORPHAN_NAME, type Axis } from './pnl';
 import { lastClosedYm, linkActualInputs, linkFromRows, stripCh, type ChannelNames, type SgaLink, type SgaLinkRow } from './sga-link';
-import type { PlanLv3 } from './plan';
+import { applyPlanForecast, l1Of, l2Of, planMapOf, type PlanItem, type PlanLv3 } from './plan';
+import { getPlanSheet } from './plan-sheet';
 import { MOMENTUM_AXES, momentum, opBridge, whaleCurve, type InsightData, type InsightPair } from './insight';
 import { buildLedger, GENERAL_ITEMS, ledgerInputs, type GlMonthCost, type GlRow, type Ledger, type LedgerMonth } from './ledger';
 import { buildPriceTrend, type PriceItem, type PriceTrend } from './price';
@@ -474,21 +475,10 @@ async function readTargets(): Promise<Target[]> {
 }
 export const getTargets = unstable_cache(readTargets, ['target-product-v1'], { revalidate: 300, tags: ['manual'] });
 
-async function readPlans(): Promise<PlanLv3[]> {
-  const rows = await getStore().read(TABS.plan);
-  return rows
-    .map(({ values: v }) => ({
-      ym: toStr(v[0]).replace(/\D/g, '').slice(0, 6),
-      l3: toStr(v[1]),
-      l3t: toStr(v[2]),
-      sales: toNum(v[3]),
-      updatedAt: toStr(v[4]),
-      updatedBy: toStr(v[5]),
-    }))
-    .filter((p) => p.ym.length === 6 && p.l3);
+/** 판매계획 (제품계층 LV3 × 월). 운영 시트 plan_lv3 탭에서 사용자가 직접 입력 (lib/plan-sheet.ts) */
+export async function getPlans(): Promise<PlanLv3[]> {
+  return (await getPlanSheet()).plans;
 }
-/** 판매계획 (제품계층 LV3 × 월) */
-export const getPlans = unstable_cache(readPlans, ['plan-lv3-v2'], { revalidate: 300, tags: ['manual'] });
 
 /** 그 달 제품 목표 (같은 제품이 여러 줄이면 합산) */
 export function targetMapOf(targets: Target[], ym: string): TargetMap {
@@ -650,7 +640,7 @@ const channelCount = (rows: { ch: string; name: string }[], sales: (r: { ch: str
 
 export async function getDashboard(today?: string): Promise<DashboardData> {
   const p = getPeriods(today);
-  const [hist, daily, maps, manual, rawChFacts, reps, targets, gl, link] = await Promise.all([
+  const [hist, daily, maps, manual, rawChFacts, reps, targets, gl, link, plans] = await Promise.all([
     cachedMaterials(p.today),
     cachedDaily(p.today),
     getEffectiveMap(),
@@ -660,6 +650,7 @@ export async function getDashboard(today?: string): Promise<DashboardData> {
     getTargets(),
     getGlCosts(p),
     getSgaLink(),
+    getPlans(),
   ]);
   const { facts, costYms, prevClosed, curClosed } = applyCostBasis(hist, p.histYms);
   const { chFacts, estYms } = withEstimatedCogs(rawChFacts, facts, p.curYm);
@@ -689,6 +680,10 @@ export async function getDashboard(today?: string): Promise<DashboardData> {
     daysInMonth: p.daysInMonth,
   }).filter((r) => r.mtd.sales || r.prev.sales || r.prev.cogs || r.fcst.incentive || r.fcst.general || r.prev.incentive || r.prev.general || r.prev2.sales || r.prev2.cogs);
 
+  // 당월 예상 매출: 판매계획을 넣은 LV3는 계획 금액으로 (2026-11-16 사용자 결정). 다 지난 달을 당월로 보는 화면에서는 예상 = 실적이라 바꾸지 않는다
+  const plan = planMapOf(plans, p.curYm);
+  const planFcst = progress.elapsed < p.daysInMonth && Object.keys(plan).length ? applyPlanForecast(rows.filter((r) => r.name !== ORPHAN_NAME), plan) : null;
+
   const coverage = { unitSales: 0, rateSales: 0, noneSales: 0 };
   for (const r of rows) {
     if (r.costMethod === 'unit') coverage.unitSales += r.mtd.sales;
@@ -715,8 +710,54 @@ export async function getDashboard(today?: string): Promise<DashboardData> {
     costSource: source,
     sgaLink: sgaLinkInfo(link),
     targets: { cur: targetMapOf(targets, p.curYm), prev: targetMapOf(targets, p.prevYm) },
+    planFcst,
     storage: storageKind(),
   };
+}
+
+/**
+ * 판매계획 시트에 깔 LV3와 월. 월 = 올해 1월 ~ 12월 (연말이 3개월 안이면 내년 3개월까지).
+ * LV3 = 올해 매출이 있거나 계획이 있는 LV3, LV1 → LV2 → LV3 묶음을 지키면서 올해 매출 큰 순. 참고 매출 = 최근 마감 3개월 월평균
+ */
+export async function getPlanItems(today?: string): Promise<{ curYm: string; months: string[]; items: (PlanItem & { ytd: number })[] }> {
+  const [{ d, blocks }, plans] = await Promise.all([getMonthBlocks(today), getPlans()]);
+  const yearEnd = `${d.curYm.slice(0, 4)}12`;
+  const ahead = shiftYm(d.curYm, 3);
+  const months = ymRange(yearStartOf(d.curYm), ahead > yearEnd ? ahead : yearEnd);
+  const refYms = blocks.filter((b) => b.kind === 'actual').slice(-3).map((b) => b.ym);
+  const lv3 = new Map<string, PlanItem & { l1: string; l2: string; ytd: number }>();
+  for (const b of blocks) {
+    const ref = refYms.includes(b.ym);
+    for (const r of b.rows) {
+      if (r.name === ORPHAN_NAME || !r.l3) continue;
+      let it = lv3.get(r.l3);
+      if (!it) lv3.set(r.l3, (it = { l1: r.l1, l1t: r.l1t, l2: r.l2, l2t: r.l2t, l3: r.l3, l3t: r.l3t, ref: 0, ytd: 0 }));
+      // 당월 블록은 예상(계획 반영)이라 올해 매출에는 누계만 넣는다
+      it.ytd += b.kind === 'fcst' ? 0 : r.amt.sales;
+      if (ref) it.ref += r.amt.sales / refYms.length;
+    }
+  }
+  for (const r of d.rows) {
+    const it = r.name !== ORPHAN_NAME && r.l3 ? lv3.get(r.l3) : undefined;
+    if (it) it.ytd += r.mtd.sales;
+  }
+  const names = new Map([...lv3.values()].flatMap((i) => [[i.l1, i.l1t], [i.l2, i.l2t]] as [string, string][]));
+  for (const p of plans) {
+    if (lv3.has(p.l3)) continue;
+    const l1 = l1Of(p.l3);
+    const l2 = l2Of(p.l3);
+    lv3.set(p.l3, { l1, l1t: names.get(l1) ?? l1, l2, l2t: names.get(l2) ?? l2, l3: p.l3, l3t: p.l3t || p.l3, ref: 0, ytd: 0 });
+  }
+  const planned = new Set(plans.map((p) => p.l3));
+  const list = [...lv3.values()].filter((i) => i.ytd > 0 || planned.has(i.l3));
+  const s1 = new Map<string, number>();
+  const s2 = new Map<string, number>();
+  for (const i of list) {
+    s1.set(i.l1, (s1.get(i.l1) ?? 0) + i.ytd);
+    s2.set(`${i.l1}|${i.l2}`, (s2.get(`${i.l1}|${i.l2}`) ?? 0) + i.ytd);
+  }
+  list.sort((a, b) => s1.get(b.l1)! - s1.get(a.l1)! || a.l1.localeCompare(b.l1) || s2.get(`${b.l1}|${b.l2}`)! - s2.get(`${a.l1}|${a.l2}`)! || a.l2.localeCompare(b.l2) || b.ytd - a.ytd || a.l3.localeCompare(b.l3));
+  return { curYm: d.curYm, months, items: list.map(({ l1t, l2t, l3, l3t, ref, ytd }) => ({ l1t, l2t, l3, l3t, ref, ytd })) };
 }
 
 // ── 월별 (올해 1월 ~ 당월) ─────────────────────────────────────

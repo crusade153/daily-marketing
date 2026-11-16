@@ -31,8 +31,10 @@ export default function PlanView({
   const scale = scenario === 'mtd' ? progressRate : 1;
   const tree = useMemo(() => buildPlanTree(rows, scenario, plan, scale), [rows, scenario, plan, scale]);
   const ym = scenario === 'prev' ? prevYm : curYm;
-  const label = (s: Scenario) => `${monthLabel(s === 'prev' ? prevYm : curYm)} ${SCENARIO_LABEL[s].split(' ')[1]}`;
-  const actualLabel = SCENARIO_LABEL[scenario].split(' ')[1];
+  // 당월 예상 자리는 누계 추세 (대시보드 예상은 계획을 반영하므로 계획과 비교하려고 추세를 쓴다)
+  const word = (s: Scenario) => (s === 'fcst' ? '추세' : SCENARIO_LABEL[s].split(' ')[1]);
+  const label = (s: Scenario) => `${monthLabel(s === 'prev' ? prevYm : curYm)} ${word(s)}`;
+  const actualLabel = word(scenario);
   const t = tree.total;
   const totalAch = achieve(t.plannedActual, t.plan);
   const unplanned = t.actual - t.plannedActual;

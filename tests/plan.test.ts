@@ -1,7 +1,7 @@
 // node --test tests/  (Node 24 타입 제거 실행)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { achieve, buildPlanTree, planMapOf, type PlanLv3, type PlanSourceRow } from '../lib/plan.ts';
+import { achieve, applyPlanForecast, buildPlanTree, parseMonthHeader, parsePlanGrid, planMapOf, type PlanLv3, type PlanSourceRow } from '../lib/plan.ts';
 
 const row = (l3: string, l3t: string, fcst: number): PlanSourceRow => ({
   l1: l3.slice(0, 3),
@@ -14,7 +14,7 @@ const row = (l3: string, l3t: string, fcst: number): PlanSourceRow => ({
   fcst,
   prev: 0,
 });
-const plan = (ym: string, l3: string, sales: number): PlanLv3 => ({ ym, l3, l3t: `계획 ${l3}`, sales, updatedAt: '', updatedBy: '' });
+const plan = (ym: string, l3: string, sales: number): PlanLv3 => ({ ym, l3, l3t: `계획 ${l3}`, sales });
 
 test('계획 맵: 같은 달·LV3 합산, 다른 달 무시', () => {
   const m = planMapOf([plan('202611', 'A01B000010001', 100), plan('202611', 'A01B000010001', 50), plan('202610', 'A01B000010001', 999)], '202611');
@@ -52,4 +52,44 @@ test('누계 보기: 계획 × 진행률', () => {
 test('달성률: 계획 0 이하면 없음', () => {
   assert.equal(achieve(10, 0), null);
   assert.equal(achieve(10, null), null);
+});
+
+test('시트 월 머리글: 여러 표기를 YYYYMM으로', () => {
+  assert.equal(parseMonthHeader('2026-11'), '202611');
+  assert.equal(parseMonthHeader('202611'), '202611');
+  assert.equal(parseMonthHeader(202601), '202601');
+  assert.equal(parseMonthHeader('2026년 3월'), '202603');
+  assert.equal(parseMonthHeader('2026.13'), null);
+  assert.equal(parseMonthHeader('LV3명'), null);
+});
+
+test('시트 파싱: 행 = LV3, 월 열 금액, 빈 칸·코드 없는 행 건너뜀', () => {
+  const g = parsePlanGrid([
+    ['LV1', 'LV2', 'LV3코드', 'LV3명', '참고', '2026-11', '메모', '2026-12'],
+    ['더미식', '즉석밥', 'A01B000010001', '흰밥', 300, '1,000,000', 'x', ''],
+    ['', '', '', '합계', 0, 5, '', 5],
+    ['더미식', '즉석밥', 'A01B000010002', '잡곡밥', 100, '', '', 200],
+  ]);
+  assert.deepEqual(g.months, [{ ym: '202611', col: 5 }, { ym: '202612', col: 7 }]);
+  assert.deepEqual(g.rows, [{ l3: 'A01B000010001', row: 2 }, { l3: 'A01B000010002', row: 4 }]);
+  assert.deepEqual(g.plans, [
+    { ym: '202611', l3: 'A01B000010001', l3t: '흰밥', sales: 1_000_000 },
+    { ym: '202612', l3: 'A01B000010002', l3t: '잡곡밥', sales: 200 },
+  ]);
+});
+
+test('예상 = 계획: LV3 안 행들을 예상 매출 비중으로, 원가·수량은 같은 배수, 비용은 그대로', () => {
+  const amt = (sales: number, cogs: number) => ({ sales, qty: sales / 10, cogs, incentive: 7, general: 3 });
+  const rows = [
+    { l3: 'A', fcst: amt(60, 30) },
+    { l3: 'A', fcst: amt(40, 20) },
+    { l3: 'B', fcst: amt(50, 25) },
+  ];
+  const res = applyPlanForecast(rows, { A: { sales: 200, l3t: 'A' }, C: { sales: 80, l3t: '신제품' } });
+  assert.deepEqual(rows[0].fcst, { sales: 120, qty: 12, cogs: 60, incentive: 7, general: 3 });
+  assert.deepEqual(rows[1].fcst, { sales: 80, qty: 8, cogs: 40, incentive: 7, general: 3 });
+  assert.deepEqual(rows[2].fcst, amt(50, 25)); // 계획 없는 LV3는 그대로
+  assert.equal(res.lv3, 1);
+  assert.equal(res.sales, 200);
+  assert.deepEqual(res.skipped, [{ l3: 'C', l3t: '신제품', sales: 80 }]); // 당월 매출이 없어 나눌 곳 없음
 });

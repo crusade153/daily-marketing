@@ -1,13 +1,14 @@
 import Link from 'next/link';
 import AmountGrid, { type AmountItem, type SavedAmount } from '@/components/amount-grid';
+import PlanPanel from '@/components/plan-panel';
 import TargetPanel, { type TargetMonthStatus } from '@/components/target-panel';
 import IncentivePanel, { type IncentiveGroupStatus } from '@/components/incentive-panel';
 import { summarize } from '@/lib/incentive';
 import { getIncentiveSheet, incentiveSheetUrl } from '@/lib/incentive-sheet';
-import { getChannelInputs, getChannelTotals, getIncentiveGroups, getMonthBlocks, getPlans, getSgaLink, getTargets } from '@/lib/data';
-import { l1Of, l2Of } from '@/lib/plan';
+import { getPlanSheet, planSheetUrl } from '@/lib/plan-sheet';
+import { getChannelInputs, getChannelTotals, getIncentiveGroups, getMonthBlocks, getPlanItems, getSgaLink, getTargets } from '@/lib/data';
 import { forecastFactor, ORPHAN_NAME } from '@/lib/pnl';
-import { monthLabel, shiftYm, yearStartOf, ymRange } from '@/lib/period';
+import { monthLabel, yearStartOf, ymRange } from '@/lib/period';
 
 export const dynamic = 'force-dynamic';
 
@@ -112,52 +113,22 @@ export default async function InputPage({
       <p className="card px-4 py-3 text-sm">입력할 달이 없습니다. 모든 달이 판관비 대시보드 연동 데이터로 채워져 있습니다.</p>
     );
   } else if (tab === 'plan') {
-    // 판매계획: 올해 1월 ~ 12월(연말이 3개월 안이면 내년 3개월까지), 올해 매출이 있거나 계획이 있는 LV3
-    const plans = await getPlans();
-    const yearEnd = `${d.curYm.slice(0, 4)}12`;
-    const ahead = shiftYm(d.curYm, 3);
-    const planMonths = ymRange(yearStartOf(d.curYm), ahead > yearEnd ? ahead : yearEnd);
-    const refYms = blocks.filter((b) => b.kind === 'actual').slice(-3).map((b) => b.ym);
-    const lv3 = new Map<string, { l1: string; l1t: string; l2: string; l2t: string; l3: string; l3t: string; ref: number; ytd: number }>();
-    for (const b of blocks) {
-      const ref = refYms.includes(b.ym);
-      for (const r of b.rows) {
-        if (r.name === ORPHAN_NAME || !r.l3) continue;
-        let it = lv3.get(r.l3);
-        if (!it) lv3.set(r.l3, (it = { l1: r.l1, l1t: r.l1t, l2: r.l2, l2t: r.l2t, l3: r.l3, l3t: r.l3t, ref: 0, ytd: 0 }));
-        it.ytd += r.amt.sales;
-        if (ref) it.ref += r.amt.sales / refYms.length;
-      }
-    }
-    const names = new Map([...lv3.values()].flatMap((i) => [[i.l1, i.l1t], [i.l2, i.l2t]] as [string, string][]));
-    for (const p of plans) {
-      if (lv3.has(p.l3)) continue;
-      const l1 = l1Of(p.l3);
-      const l2 = l2Of(p.l3);
-      lv3.set(p.l3, { l1, l1t: names.get(l1) ?? l1, l2, l2t: names.get(l2) ?? l2, l3: p.l3, l3t: p.l3t || p.l3, ref: 0, ytd: 0 });
-    }
-    const planned = new Set(plans.map((p) => p.l3));
-    const list = [...lv3.values()].filter((i) => i.ytd > 0 || planned.has(i.l3));
-    // LV1 → LV2 → LV3 묶음을 지키면서 올해 매출 큰 순
-    const s1 = new Map<string, number>();
-    const s2 = new Map<string, number>();
-    for (const i of list) {
-      s1.set(i.l1, (s1.get(i.l1) ?? 0) + i.ytd);
-      s2.set(`${i.l1}|${i.l2}`, (s2.get(`${i.l1}|${i.l2}`) ?? 0) + i.ytd);
-    }
-    list.sort((a, b) => s1.get(b.l1)! - s1.get(a.l1)! || a.l1.localeCompare(b.l1) || s2.get(`${b.l1}|${b.l2}`)! - s2.get(`${a.l1}|${a.l2}`)! || a.l2.localeCompare(b.l2) || b.ytd - a.ytd || a.l3.localeCompare(b.l3));
-    const items: AmountItem[] = list.map((i) => ({ key: i.l3, label: i.l3t, groups: [i.l1t, i.l2t], ref: Object.fromEntries(planMonths.map((m) => [m, i.ref])) }));
-    intro = '제품계층 LV3별 월 판매계획(매출 금액)을 입력합니다. 계획이 LV3 단위라 ‘판매계획 대비’ 분석도 LV3까지입니다. 참고 매출은 최근 마감 3개월 월평균입니다.';
+    // 판매계획: 구글 시트 plan_lv3 탭(행 = LV3, 열 = 월)에서 직접 입력. 여기서는 행 깔기와 입력한 값 확인
+    const [{ months, items }, sheet] = await Promise.all([getPlanItems(), getPlanSheet()]);
+    const plans: Record<string, Record<string, number>> = {};
+    for (const p of sheet.plans) (plans[p.ym] ??= {})[p.l3] = (plans[p.ym][p.l3] ?? 0) + p.sales;
+    const inSheet = new Set(sheet.l3s);
+    intro = '제품계층 LV3별 월 판매계획(매출 금액)은 구글 시트에서 직접 입력합니다. 입력한 당월 계획은 경영 요약·손익 분석의 ‘당월 예상’ 매출에 그대로 반영됩니다. 계획이 LV3 단위라 ‘판매계획 대비’ 분석도 LV3까지입니다.';
     body = (
-      <AmountGrid
-        kind="plan"
-        rowName="제품계층 LV3"
-        fieldLabel="매출계획"
-        refLabel="최근 3개월 평균 매출"
-        items={items}
-        saved={plans.map((p) => ({ ym: p.ym, key: p.l3, amount: p.sales, updatedAt: p.updatedAt, updatedBy: p.updatedBy }))}
-        months={planMonths}
-        initialYm={d.curYm}
+      <PlanPanel
+        months={months}
+        curYm={d.curYm}
+        items={items.map((i) => ({ l1t: i.l1t, l2t: i.l2t, l3: i.l3, l3t: i.l3t, ref: i.ref, inSheet: inSheet.has(i.l3) }))}
+        plans={plans}
+        sheetUrl={planSheetUrl(sheet.gid)}
+        sheetError={sheet.error}
+        sheetMonths={sheet.months}
+        skipped={d.planFcst?.skipped ?? []}
       />
     );
   } else {

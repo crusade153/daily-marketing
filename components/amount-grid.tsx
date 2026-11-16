@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { saveChannelGenerals, savePlans, saveSgIncentives, type SaveResult } from '@/actions/input-actions';
+import { saveChannelGenerals, saveSgIncentives, type SaveResult } from '@/actions/input-actions';
 import { mil, pct } from '@/lib/format';
 import { monthLabel } from '@/lib/period';
 
@@ -24,8 +24,8 @@ export interface SavedAmount {
   updatedBy: string;
 }
 
-export type AmountKind = 'sg' | 'ch' | 'plan';
-const SAVE: Record<AmountKind, (input: unknown) => Promise<SaveResult>> = { sg: saveSgIncentives, ch: saveChannelGenerals, plan: savePlans };
+export type AmountKind = 'sg' | 'ch';
+const SAVE: Record<AmountKind, (input: unknown) => Promise<SaveResult>> = { sg: saveSgIncentives, ch: saveChannelGenerals };
 
 const UNITS = [
   { v: 1, label: '원' },

@@ -33,7 +33,7 @@ export default async function SummaryPage({
       <Notices d={d} />
       <AnalysisTabs label="요약 분석" tabs={[
         { label: '손익 현황', content: <div className="overview-content">
-          <KpiCards total={total} curYm={d.curYm} prevYm={d.prevYm} inputStatus={d.inputStatus} />
+          <KpiCards total={total} curYm={d.curYm} prevYm={d.prevYm} inputStatus={d.inputStatus} planFcst={d.planFcst} />
           <div className="summary-panels">
           <PnlStatement total={total} curYm={d.curYm} prevYm={d.prevYm} inputStatus={d.inputStatus} />
           <CategoryOverview views={OVERVIEW_AXES.map(({ id, label }) => ({

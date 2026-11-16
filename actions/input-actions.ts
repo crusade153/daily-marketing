@@ -4,8 +4,9 @@ import { updateTag } from 'next/cache';
 import { z } from 'zod';
 import { getSession } from '@/lib/session';
 import { getStore, TABS, type Cell, type SheetRow } from '@/lib/sheets';
-import { getIncentiveGroups } from '@/lib/data';
+import { getIncentiveGroups, getPlanItems } from '@/lib/data';
 import { writeIncentiveRows } from '@/lib/incentive-sheet';
+import { writePlanRows } from '@/lib/plan-sheet';
 
 const Amount = z.number().finite().min(-1e13).max(1e13);
 
@@ -91,17 +92,19 @@ export async function saveChannelGenerals(input: unknown): Promise<SaveResult> {
   }
 }
 
-/** 판매계획 저장: 제품계층 LV3 × 월 매출 금액(원). (YYYYMM, LV3) 기준 upsert */
-export async function savePlans(input: unknown): Promise<SaveResult> {
+/**
+ * 판매계획 시트(plan_lv3)에 LV3 행과 월 열을 깐다. 금액은 사용자가 시트에서 직접 입력한다.
+ * 이미 있는 LV3는 참고 매출만 고치고 계획 금액은 건드리지 않는다
+ */
+export async function createPlanRows(): Promise<SaveResult & { created?: boolean; cols?: number }> {
   if (!(await getSession())) return NO_SESSION;
-  const parsed = AmountSaveInput.safeParse(input);
-  if (!parsed.success) return { ok: false, error: '입력값 형식이 올바르지 않습니다.' };
-  const { ym, user, entries } = parsed.data;
-  const at = nowKst();
   try {
-    return await upsert(TABS.plan, entries.map((e) => [ym, e.key, e.name, Math.round(e.amount), at, user || '-']), (v) => cellKey(v[0], v[1]));
+    const { months, items } = await getPlanItems();
+    const { created, rows, cols } = await writePlanRows(months, items);
+    updateTag('manual');
+    return { ok: true, updated: 0, appended: rows, created, cols };
   } catch (e) {
-    return fail('savePlans', e);
+    return fail('createPlanRows', e);
   }
 }
 

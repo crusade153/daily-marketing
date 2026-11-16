@@ -12,7 +12,7 @@ import { SCENARIO_LABEL, type MaterialRow, type Scenario, type TargetMap } from 
 export type PivotMode = 'product' | 'channel';
 type Slot = Axis | 'none';
 
-// 손익 분석 축 이름. 제품계층 LV 구조는 보여주지 않는다 (2026-10-30 사용자 요청)
+// 손익 분석 축 이름. 제품계층은 LV1(브랜드)~LV3까지 (2026-11-16 사용자 요청으로 LV3 기본 보기. 그전에는 LV 구조를 숨겼다)
 export const PIVOT_LABEL: Partial<Record<Axis, string>> = {
   cm: 'CM',
   owner: 'PM',
@@ -21,14 +21,18 @@ export const PIVOT_LABEL: Partial<Record<Axis, string>> = {
   ch: '채널(고객그룹3)',
   sg: '영업그룹',
   l1: '브랜드',
+  l2: '제품계층 LV2',
+  l3: '제품계층 LV3',
   rep: '영업담당자',
 };
 
 const MODES: Record<PivotMode, { axes: Axis[]; depth: number; presets: { label: string; slots: Slot[] }[] }> = {
   product: {
-    axes: ['cm', 'owner', 'category', 'name', 'ch', 'sg', 'l1'],
+    axes: ['l1', 'l2', 'l3', 'cm', 'owner', 'category', 'name', 'ch', 'sg'],
     depth: 6,
     presets: [
+      { label: '브랜드 › LV2 › LV3 › 제품', slots: ['l1', 'l2', 'l3', 'name', 'none', 'none'] },
+      { label: '제품계층 LV3 › 제품', slots: ['l3', 'name', 'none', 'none', 'none', 'none'] },
       { label: 'CM › PM › 제품라인 › 제품', slots: ['cm', 'owner', 'category', 'name', 'none', 'none'] },
       { label: 'CM › PM › 제품라인 › 제품 › 채널', slots: ['cm', 'owner', 'category', 'name', 'ch', 'none'] },
       { label: '브랜드 › 제품', slots: ['l1', 'name', 'none', 'none', 'none', 'none'] },

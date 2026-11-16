@@ -31,8 +31,7 @@ export const TABS = {
   target: { name: 'target_product', header: ['YYYYMM', 'MATNR', '제품명', '매출목표', 'GP목표', 'OP목표'] },
   // 판관비 대시보드 연동: 고객그룹3 × 월 장려금·판관비 배부 실적. scripts/import-sga-link.mts가 채운다 (공개 저장소에 금액을 올리지 않으려고 시트에 둔다)
   sgaLink: { name: 'sga_link', header: ['YYYYMM', '고객그룹3', '매출', '장려금', '판관비', '마감', '내보낸시각'] },
-  // 판매계획: 제품계층 LV3 × 월 매출 금액(원). 대시보드 '비용·계획 입력 › 판매계획'에서 입력, 첫 저장 때 탭 자동 생성
-  plan: { name: 'plan_lv3', header: ['YYYYMM', 'LV3', 'LV3명', '매출계획', '수정일시', '수정자'] },
+  // 판매계획 plan_lv3 탭은 모양이 달라(행 = LV3, 열 = 월) lib/plan-sheet.ts가 따로 읽고 쓴다
 } as const;
 
 type Tab = (typeof TABS)[keyof typeof TABS];

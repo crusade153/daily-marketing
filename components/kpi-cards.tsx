@@ -39,11 +39,14 @@ export default function KpiCards({
   curYm,
   prevYm,
   inputStatus,
+  planFcst = null,
 }: {
   total: { mtd: Amounts; fcst: Amounts; prev: Amounts };
   curYm: string;
   prevYm: string;
   inputStatus: DashboardData['inputStatus'];
+  /** 예상 매출에 반영한 판매계획 */
+  planFcst?: DashboardData['planFcst'];
 }) {
   const m = metrics(total.mtd);
   const f = metrics(total.fcst);
@@ -62,6 +65,7 @@ export default function KpiCards({
         rows={[
           [`${cur} 누계`, eok(m.sales)],
           [`${prv} 실적`, eok(p.sales)],
+          ...(planFcst?.lv3 ? ([[`판매계획 반영 (LV3 ${planFcst.lv3}개)`, eok(planFcst.sales)]] as [string, string][]) : []),
         ]}
       />
       <Card

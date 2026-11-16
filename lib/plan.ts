@@ -1,8 +1,9 @@
-// 판매계획 대비 실적 순수 계산. 계획은 제품계층 LV3 × 월 매출 금액(구글 시트 plan_lv3)이라 분석 최소 단위도 LV3다.
+// 판매계획 순수 계산. 계획은 제품계층 LV3 × 월 매출 금액(구글 시트 plan_lv3)이라 분석 최소 단위도 LV3다.
 //   제품계층 코드 길이 3·8·13 (LV1·LV2·LV3): LV1 = LV3 앞 3자리, LV2 = 앞 8자리 → 매출이 없는 계획 행도 상위 계층에 붙일 수 있다
 //   누계 보기는 월 계획 × 월 진행률과 비교한다 (목표비와 같은 방식)
+//   2026-11-16: 시트에서 직접 입력 (행 = LV3, 열 = 월). 당월 예상 매출은 계획을 넣은 LV3는 계획 금액으로 바꾼다 (applyPlanForecast)
 
-import type { Hierarchy, Scenario } from './types';
+import type { Amounts, Hierarchy, Scenario } from './types';
 
 /** 판매계획 한 줄 (매출 금액, 원) */
 export interface PlanLv3 {
@@ -10,8 +11,121 @@ export interface PlanLv3 {
   l3: string;
   l3t: string;
   sales: number;
-  updatedAt: string;
-  updatedBy: string;
+}
+
+// ── 시트 모양: 1행 머리글, A~E 고정 열 + 월 열('2026-11'). 행 = LV3 ──────────────
+
+export const PLAN_TAB = 'plan_lv3';
+export const PLAN_HEADER = ['LV1', 'LV2', 'LV3코드', 'LV3명', '참고: 최근 3개월 월평균 매출(원)'] as const;
+/** LV3 코드 열 (0부터) */
+const CODE_COL = 2;
+
+type Cell = string | number | boolean | null | undefined;
+
+/** 월 열 머리글: '2026-11' */
+export const monthHeader = (ym: string) => `${ym.slice(0, 4)}-${ym.slice(4, 6)}`;
+
+/** 월 열 머리글 → YYYYMM. '2026-11' · '202611' · '2026.11' · '2026년 11월' 을 받는다. 월 열이 아니면 null */
+export function parseMonthHeader(v: Cell): string | null {
+  const m = String(v ?? '').trim().match(/^(20\d{2})\s*[-./년]?\s*(\d{1,2})\s*월?$/);
+  if (!m) return null;
+  const mm = Number(m[2]);
+  return mm >= 1 && mm <= 12 ? `${m[1]}${String(mm).padStart(2, '0')}` : null;
+}
+
+const num = (v: Cell): number => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  const n = Number(String(v ?? '').replace(/[,\s원]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+};
+
+export interface PlanGrid {
+  plans: PlanLv3[];
+  /** 월 열: YYYYMM과 열 번호 (0부터) */
+  months: { ym: string; col: number }[];
+  /** LV3 행: 코드와 시트 행 번호 (1부터, 머리글 = 1) */
+  rows: { l3: string; row: number }[];
+}
+
+/** 시트 값(1행 머리글 포함) → 계획. 빈 칸·0은 계획 없음. LV3 코드가 빈 행(메모·합계 등)은 건너뛴다 */
+export function parsePlanGrid(values: Cell[][]): PlanGrid {
+  const head = values[0] ?? [];
+  const months = head.flatMap((h, col) => {
+    const ym = col >= PLAN_HEADER.length ? parseMonthHeader(h) : null;
+    return ym ? [{ ym, col }] : [];
+  });
+  const plans: PlanLv3[] = [];
+  const rows: PlanGrid['rows'] = [];
+  values.slice(1).forEach((v, i) => {
+    const l3 = String(v[CODE_COL] ?? '').trim();
+    if (!l3) return;
+    rows.push({ l3, row: i + 2 });
+    const l3t = String(v[3] ?? '').trim();
+    for (const m of months) {
+      const sales = num(v[m.col]);
+      if (sales) plans.push({ ym: m.ym, l3, l3t, sales });
+    }
+  });
+  return { plans, months, rows };
+}
+
+/** 시트에 깔 LV3 한 줄 */
+export interface PlanItem {
+  l1t: string;
+  l2t: string;
+  l3: string;
+  l3t: string;
+  /** 참고 매출: 최근 마감 3개월 월평균 (원) */
+  ref: number;
+}
+
+// ── 당월 예상 = 계획 ─────────────────────────────────────────
+
+/** 예상 매출을 바꿀 행 모양 */
+export interface PlanFcstRow {
+  l3: string;
+  fcst: Amounts;
+}
+
+export interface PlanFcstResult {
+  /** 예상 매출을 계획으로 바꾼 LV3 수와 그 계획 합 */
+  lv3: number;
+  sales: number;
+  /** 계획은 있으나 당월 매출이 아직 없어 제품에 나눌 수 없는 LV3 (예상에 반영 안 됨) */
+  skipped: { l3: string; l3t: string; sales: number }[];
+}
+
+/**
+ * 계획을 넣은 LV3는 당월 예상 매출을 계획 금액으로 바꾼다. 그 LV3 행들의 예상(누계 × 진행일 배수) 매출 비중으로 나누고,
+ * 수량·매출원가도 같은 배수로 움직여 단가·원가율은 누계 그대로 둔다. 장려금·일반비는 월 입력 금액이라 그대로 둔다.
+ * 그 LV3에 당월 매출이 아직 없으면 나눌 곳이 없어 건너뛴다 (skipped). rows를 직접 고친다.
+ */
+export function applyPlanForecast(rows: PlanFcstRow[], plan: PlanMap): PlanFcstResult {
+  const by = new Map<string, PlanFcstRow[]>();
+  for (const r of rows) {
+    if (!plan[r.l3]) continue;
+    const list = by.get(r.l3);
+    if (list) list.push(r);
+    else by.set(r.l3, [r]);
+  }
+  const out: PlanFcstResult = { lv3: 0, sales: 0, skipped: [] };
+  for (const [l3, p] of Object.entries(plan)) {
+    if (!p.sales) continue;
+    const list = by.get(l3) ?? [];
+    const base = list.reduce((s, r) => s + r.fcst.sales, 0);
+    if (base <= 0) {
+      out.skipped.push({ l3, l3t: p.l3t, sales: p.sales });
+      continue;
+    }
+    const k = p.sales / base;
+    for (const r of list) {
+      r.fcst = { ...r.fcst, sales: r.fcst.sales * k, qty: r.fcst.qty * k, cogs: r.fcst.cogs * k };
+    }
+    out.lv3 += 1;
+    out.sales += p.sales;
+  }
+  out.skipped.sort((a, b) => b.sales - a.sales);
+  return out;
 }
 
 /** LV3 → 그 달 계획 금액 (같은 LV3가 여러 줄이면 합산) */

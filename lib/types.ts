@@ -1,3 +1,4 @@
+import type { PlanFcstResult } from './plan';
 export type Scenario = 'mtd' | 'fcst' | 'prev';
 
 export const SCENARIO_LABEL: Record<Scenario, string> = {
@@ -214,5 +215,7 @@ export interface DashboardData {
   sgaLink: { generatedAt: string; lastClosed: string; lastYm: string };
   /** 당월·전월 제품 목표 */
   targets: { cur: TargetMap; prev: TargetMap };
+  /** 당월 예상 매출에 판매계획을 반영한 결과 (계획이 없거나 다 지난 달이면 null) */
+  planFcst: PlanFcstResult | null;
   storage: 'sheets' | 'local';
 }
