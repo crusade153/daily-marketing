@@ -13,8 +13,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html lang="ko">
       <body className="min-h-screen">
-        <Nav user={session && { name: session.name, role: session.role }} />
-        <main id="main-content" className="app-main">{children}</main>
+        <Nav user={session && { name: session.name, role: session.role }}>{children}</Nav>
       </body>
     </html>
   );

@@ -64,7 +64,7 @@ export default function ChannelOwnerEditor({ channels }: { channels: ChannelRow[
       <div className="lo-head">
         <div>
           <h2>채널별 영업담당자</h2>
-          <p>고객그룹3마다 영업담당자 한 명을 적습니다. 채널별 손익 분석이 영업담당자 › 채널 › 제품 순으로 묶입니다. 비워 두면 ‘(미매핑)’입니다.</p>
+          <p>고객그룹3별 영업담당자 1명</p>
         </div>
       </div>
       <div className="lo-toolbar">

@@ -76,11 +76,7 @@ export default function TargetPanel({
       </div>
       <details className="method-note target-note">
         <summary>입력 방법</summary>
-        <p>
-          시트 target_product 탭의 열: YYYYMM · MATNR · 제품명 · 매출목표 · GP목표 · OP목표 (원). ‘제품 행 채우기’는 올해 매출이 있는 제품 중
-          그 달 행이 없는 제품만 추가합니다. 같은 달·제품이 두 줄이면 합산됩니다. 손익 분석의 목표비 = 실적 ÷ 목표이며, 누계 보기에서는 월 목표 × 월 진행률과 비교합니다.
-          GP 목표는 순매출(총매출 − 장려금) − 매출원가, OP 목표는 GP − 일반비 기준으로 입력합니다.
-        </p>
+        <p>시트 target_product에서 제품별 매출·매출총이익·영업이익 목표를 원 단위로 입력합니다. 누계 실적은 월 목표에 진행률을 곱한 값과 비교합니다.</p>
       </details>
     </div>
   );

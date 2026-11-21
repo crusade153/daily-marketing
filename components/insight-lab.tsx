@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type ReactNode } from 'react';
+import AnalysisTabs from './analysis-tabs';
 import { eok, pct, ppt, signedEok, tone } from '@/lib/format';
 import {
   FACTOR_HINT,
@@ -107,12 +108,14 @@ export default function InsightLab({ data }: { data: InsightData }) {
       {pair.coverage.length > 0 && (
         <div className="notice-bar">
           <span className="notice-label">입력 확인</span>
-          <span>장려금·일반비 입력 미완료: {pair.coverage.join(' · ')} — 장려금·일반비 요인에는 입력 차이가 섞여 있습니다.</span>
+          <span>장려금·일반비 입력 미완료: {pair.coverage.join(' · ')}</span>
         </div>
       )}
-      <BridgePanel pair={pair} />
-      <WhalePanel data={data} metric={metric} />
-      <MomentumPanel pair={pair} />
+      <AnalysisTabs label="손익 인사이트 보기" preserve tabs={[
+        { label: '이익 변동 요인', content: <BridgePanel pair={pair} /> },
+        { label: '제품별 이익 기여', content: <WhalePanel data={data} metric={metric} /> },
+        { label: '매출·수익성 변화', content: <MomentumPanel pair={pair} /> },
+      ]} />
     </div>
   );
 }
@@ -200,8 +203,8 @@ function BridgePanel({ pair }: { pair: InsightPair }) {
 
   return (
     <Panel
-      title="① 영업이익 브리지"
-      desc={`${pair.baseLabel} → ${pair.curLabel} 영업이익 차이 ${signedEok(b.cur - b.base)}를 가격·물량·믹스·원가·비용으로 나눴습니다. 요인을 누르면 기여 제품·채널이 나옵니다.`}
+      title="영업이익 변동 요인"
+      desc={`${pair.baseLabel} → ${pair.curLabel} 영업이익 ${signedEok(b.cur - b.base)}`}
       tools={<span className="unit-label">단위: 억원</span>}
     >
       <div ref={ref} className="il-bridge">
@@ -219,9 +222,8 @@ function BridgePanel({ pair }: { pair: InsightPair }) {
       <div className="panel-footer il-foot">
         <span>
           단가 비교 가능 매출 비중 {pct(b.matchedShare, 0)}
-          {pair.fcst && ' · 진행 중인 달의 매출원가는 최근 3개월 평균 단위원가 기준이라, 단위원가 요인은 그 평균과 기준월 실제원가의 차이입니다'}
+          {pair.fcst && ' · 예상 원가는 최근 3개월 평균 단가 기준'}
         </span>
-        <span>요인 합계 = 영업이익 차이 (반올림 오차 제외)</span>
       </div>
     </Panel>
   );
@@ -301,8 +303,8 @@ function WhalePanel({ data, metric }: { data: InsightData; metric: ProfitMetric 
   const loss = w.peak - w.total;
   return (
     <Panel
-      title="② 이익 고래곡선"
-      desc={`제품을 ${METRIC_LABEL[metric]} 큰 순으로 쌓은 누적 곡선입니다. 정점까지가 흑자 제품, 정점 이후 내려가는 꼬리가 적자 제품이 깎은 이익입니다.`}
+      title="제품별 이익 기여"
+      desc={`${METRIC_LABEL[metric]} 누적 · 정점 이후는 적자 제품의 영향`}
       tools={<Segmented label="기간" value={wh.id} options={data.whales.map((x) => ({ id: x.id, label: x.label }))} onChange={setId} />}
     >
       <div className="il-whale">
@@ -469,8 +471,8 @@ function MomentumPanel({ pair }: { pair: InsightPair }) {
 
   return (
     <Panel
-      title="③ 성장 품질 맵"
-      desc={`${pair.baseLabel}(빈 원) → ${pair.curLabel}(채운 원) 이동 궤적. 오른쪽은 매출 증가, 위쪽은 ${names.rate} 개선입니다. 원 크기 = ${pair.curLabel} 매출.`}
+      title="매출·수익성 변화"
+      desc={`${pair.baseLabel}(빈 원) → ${pair.curLabel}(채운 원) · 오른쪽은 매출 증가, 위쪽은 ${names.rate} 개선`}
       tools={
         <div className="il-tools">
           <Segmented label="묶음 기준" value={axis} options={MOMENTUM_AXES.map((a) => ({ id: a, label: AXIS_LABEL[a] }))} onChange={setAxis} />

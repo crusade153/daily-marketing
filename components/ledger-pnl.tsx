@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useState, type ReactNode } from 'react';
+import AnalysisTabs from './analysis-tabs';
 import { eok, pct, tone } from '@/lib/format';
 import { closedIdx, statementOf, type Ledger, type LedgerKind, type Line, type Statement } from '@/lib/ledger';
 import { dateLabel, monthLabel } from '@/lib/period';
@@ -34,19 +35,19 @@ export default function LedgerPnl({ data }: { data: LedgerData }) {
       {closed.length > 0 && <Hero ytd={ytd} range={range} n={closed.length} />}
       <div className="notice-bar lp-source">
         <span className="notice-label">원천</span>
-        <span>총매출·매출원가 = CO-PA 실적 · 매출조정(장려금) = 회계원장 41xx · 판관비 = 회계원장 61xx (팀별). 수기 입력값은 쓰지 않습니다.</span>
+        <span>매출·원가: CO-PA · 장려금·판관비: SAP 회계원장</span>
         {data.dataDate && <span className="notice-action">매출 {dateLabel(data.dataDate)} 기준</span>}
       </div>
-      <StructureChart data={data} st={st} />
-      <StatementTable data={data} st={st} ytd={ytd} range={range} />
       {est >= 0 && data.posted && (
         <p className="summary-footnote">
-          {monthLabel(data.months[est].ym)}은 마감 전입니다. 총매출·매출원가는 월말 예상(누계 ÷ 진행일 × 월 일수, 원가는 최근 3개월 평균 단위원가), 매출조정·판관비는{' '}
-          {data.basis.map(monthLabel).join('·')} 평균으로 추정했습니다. 지금까지 원장 반영분: 매출조정 {eok(data.posted.adj)}, 판관비 {eok(data.posted.sga)}.
-          {data.months.some((m) => m.kind === 'provisional') && ' 잠정 = 매월 15일 전까지는 전월 결산 전표가 더 들어올 수 있습니다.'}
+          {monthLabel(data.months[est].ym)} 비용은 {data.basis.map(monthLabel).join("·")} 평균 추정 · 원장 반영 장려금 {eok(data.posted.adj)} · 판관비 {eok(data.posted.sga)}
         </p>
       )}
-      <TeamPanel data={data} closed={closed} range={range} />
+      <AnalysisTabs label="SAP 손익 보기" preserve tabs={[
+        { label: '월별 손익계산서', content: <StatementTable data={data} st={st} ytd={ytd} range={range} /> },
+        { label: '매출 100원당 손익', content: <StructureChart data={data} st={st} /> },
+        { label: '팀별 판관비', content: <TeamPanel data={data} closed={closed} range={range} /> },
+      ]} />
     </div>
   );
 }
@@ -126,7 +127,7 @@ function StructureChart({ data, st }: { data: LedgerData; st: Statement[] }) {
   return (
     <Panel
       title="총매출 100원은 어디로 갔나"
-      desc="월별로 총매출 100원을 매출조정(장려금)·매출원가·판관비가 얼마씩 가져갔는지 쌓았습니다. 막대가 100원 선을 넘은 만큼이 영업손실, 못 미친 만큼이 영업이익입니다."
+      desc="100원 초과분은 영업손실, 남은 금액은 영업이익"
       tools={
         <div className="lp-legend">
           {(Object.keys(PART_LABEL) as (keyof typeof PART_LABEL)[]).map((k) => (
@@ -311,7 +312,7 @@ function StatementTable({ data, st, ytd, range }: { data: LedgerData; st: Statem
   return (
     <Panel
       title="실적 손익계산서"
-      desc="SAP 실적만으로 계산한 월별 손익입니다. 매출조정·판관비를 누르면 계정과 비용 분류가 펼쳐집니다."
+      desc="매출조정·판관비 선택 시 계정 상세"
       tools={<span className="unit-label">단위: 억원</span>}
     >
       <div className="lp-scroll">
@@ -366,7 +367,7 @@ function TeamPanel({ data, closed, range }: { data: LedgerData; closed: number[]
   return (
     <Panel
       title="판관비 팀별"
-      desc={`${range} 판관비를 코스트센터(팀) 기준으로 나눴습니다. 추이는 월별 실적입니다.`}
+      desc={`${range} 마감 실적 · 코스트센터 기준`}
       tools={<span className="unit-label">단위: 억원</span>}
     >
       <div className="lp-scroll">

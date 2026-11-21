@@ -25,7 +25,6 @@ export default async function InsightsPage({
       <div className="page-intro">
         <h1>손익 인사이트 <span className="il-beta">관리자 시범</span></h1>
         <MonthStepper {...monthLinks('/admin/insights', sel)} />
-        <p>영업이익이 왜 변했는지(가격·물량·믹스·원가·비용), 어떤 제품이 이익을 만들고 깎는지, 어디서 매출이 늘면서 수익성이 나빠졌는지를 봅니다. 관리자에게만 보입니다.</p>
       </div>
       <InsightLab data={data} />
     </div>

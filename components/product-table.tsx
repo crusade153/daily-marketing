@@ -7,12 +7,12 @@ import { metrics, unitPrice, type Metrics } from '@/lib/pnl';
 import { monthLabel, shiftYm } from '@/lib/period';
 import { GRADE_RANK } from '@/lib/segment';
 import { SCENARIO_LABEL, type MaterialRow, type Scenario } from '@/lib/types';
-import CompactToggle from './compact-toggle';
 import GradeAlert from './grade-alert';
 import { GradeShift } from './grade-chip';
 
 const PAGE = 200;
-const KEY_COLS = new Set(['matnr', 'name', 'grade', 'cm', 'owner', 'l1', 'qty', 'price', 'sales', 'gp', 'gpm', 'op', 'growth', 'pprice', 'pchg']);
+const KEY_COLS = new Set(['matnr', 'name', 'grade', 'l1', 'sales', 'growth', 'gp', 'gpm', 'op', 'opm']);
+const PRICE_COLS = new Set(['matnr', 'name', 'l1', 'qty', 'price', 'sales', 'psales', 'pprice', 'pchg']);
 const TEXT_COLS = ['matnr', 'name', 'cm', 'owner', 'category', 'l1'];
 const MOBILE_SORTS = [
   { id: 'sales', label: '매출순' },
@@ -74,10 +74,10 @@ const COLS: Col[] = [
   { id: 'net', label: '순매출', num: true, sort: (_, c) => c.m.net, cell: (_, c) => mil(c.m.net) },
   { id: 'cogs', label: '매출원가', num: true, sort: (_, c) => c.m.cogs, cell: (_, c) => mil(c.m.cogs) },
   { id: 'gp', label: '매출총이익', num: true, sort: (_, c) => c.m.gp, cell: (_, c) => mil(c.m.gp) },
-  { id: 'gpm', label: 'GP율', num: true, sort: (_, c) => c.m.gpm, cell: (_, c) => pct(c.m.gpm), className: (_, c) => tone(c.m.gpm) },
+  { id: 'gpm', label: 'GP율', num: true, sort: (_, c) => c.m.gpm, cell: (_, c) => pct(c.m.gpm), className: (_, c) => (c.m.gpm ?? 0) < 0 ? 'text-neg' : '' },
   { id: 'gen', label: '일반비', num: true, sort: (_, c) => c.m.general, cell: (_, c) => mil(c.m.general) },
-  { id: 'op', label: '영업이익', num: true, sort: (_, c) => c.m.op, cell: (_, c) => mil(c.m.op), className: (_, c) => `font-semibold ${tone(c.m.op)}` },
-  { id: 'opm', label: 'OP율', num: true, sort: (_, c) => c.m.opm, cell: (_, c) => pct(c.m.opm), className: (_, c) => tone(c.m.opm) },
+  { id: 'op', label: '영업이익', num: true, sort: (_, c) => c.m.op, cell: (_, c) => mil(c.m.op), className: (_, c) => `font-semibold ${(c.m.op ?? 0) < 0 ? 'text-neg' : ''}` },
+  { id: 'opm', label: 'OP율', num: true, sort: (_, c) => c.m.opm, cell: (_, c) => pct(c.m.opm), className: (_, c) => (c.m.opm ?? 0) < 0 ? 'text-neg' : '' },
   {
     id: 'psales',
     label: '전월 매출',
@@ -122,11 +122,11 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<{ id: string; desc: boolean }>({ id: 'sales', desc: true });
   const [limit, setLimit] = useState(PAGE);
-  const [detail, setDetail] = useState(false);
+  const [columnView, setColumnView] = useState<'key' | 'price' | 'all'>('key');
 
   // 고른 기간의 '전월': 누계·예상은 전월 실적, 전월 실적 보기는 전전월 실적
   const base = scenario === 'prev' ? 'prev2' : 'prev';
-  const cols = COLS.filter((c) => detail || KEY_COLS.has(c.id));
+  const cols = COLS.filter((c) => columnView === 'all' || (columnView === 'price' ? PRICE_COLS : KEY_COLS).has(c.id));
   const pair = gradePair(scenario);
   const changes = useMemo(() => gradeChanges(rows, false, pair.from, pair.to), [rows, pair.from, pair.to]);
   const [picked, setPicked] = useState<string | null>(null);
@@ -201,9 +201,9 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
   const periodName = (p: 'prev2' | Scenario) => (p === 'prev2' ? `${monthLabel(shiftYm(prevYm, -1))} 실적` : label(p));
 
   return (
-    <>
+    <div className="report-table-stack">
     <GradeAlert changes={changes} fromLabel={periodName(pair.from)} toLabel={periodName(pair.to)} unitLabel="제품" picked={picked} onPick={pick} />
-    <div className="card">
+    <div className="card report-table-card">
       <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 text-sm">
         <div className="flex overflow-hidden rounded-md border border-border">
           {(['mtd', 'fcst', 'prev'] as Scenario[]).map((s) => (
@@ -260,15 +260,15 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
           {!MOBILE_SORTS.some((o) => o.id === sort.id) && <option value={sort.id}>{COLS.find((c) => c.id === sort.id)?.label}순</option>}
         </select>
         <div className="segmented only-pc" role="group" aria-label="표시할 제품 지표">
-          <button type="button" aria-pressed={!detail} onClick={() => setDetail(false)}>핵심 지표</button>
-          <button type="button" aria-pressed={detail} onClick={() => setDetail(true)}>전체 지표</button>
+          <button type="button" aria-pressed={columnView === 'key'} onClick={() => setColumnView('key')}>핵심 지표</button>
+          <button type="button" aria-pressed={columnView === 'price'} onClick={() => setColumnView('price')}>판매단가</button>
+          <button type="button" aria-pressed={columnView === 'all'} onClick={() => setColumnView('all')}>전체</button>
         </div>
         <span className="ml-auto text-xs text-muted">
-          {list.length.toLocaleString()}개 제품 · 금액 백만원, 단가 원/EA<span className="only-pc"> · 머리글을 누르면 정렬</span>
+          {list.length.toLocaleString()}개 제품 · 금액 백만원{columnView !== 'key' ? ' · 단가 원/EA' : ''}
         </span>
-        <CompactToggle />
       </div>
-      <div className="data-scroll only-pc">
+      <div className="data-scroll only-pc" role="region" aria-label="제품 손익 목록" tabIndex={0}>
         <table className="dtable product-dtable">
           <thead>
             <tr>
@@ -345,7 +345,7 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
               )}
               <dl className="m-metrics">
                 <div><dt>매출</dt><dd className="font-semibold">{mil(ctx.m.sales)}</dd><dd className={`m-delta ${tone(chg)}`}>{pct(chg)}</dd></div>
-                <div><dt>GP</dt><dd>{mil(ctx.m.gp)} <small className={tone(ctx.m.gpm)}>{pct(ctx.m.gpm)}</small></dd></div>
+                <div><dt>GP</dt><dd>{mil(ctx.m.gp)} <small className={(ctx.m.gpm ?? 0) < 0 ? 'text-neg' : ''}>{pct(ctx.m.gpm)}</small></dd></div>
                 <div><dt>단가(원)</dt><dd>{ctx.price == null ? '-' : won(ctx.price)}</dd><dd className={`m-delta ${tone(priceChg(ctx))}`}>{pct(priceChg(ctx))}</dd></div>
               </dl>
             </li>
@@ -360,6 +360,6 @@ export default function ProductTable({ rows, curYm, prevYm }: { rows: MaterialRo
         )}
       </ul>
     </div>
-    </>
+    </div>
   );
 }

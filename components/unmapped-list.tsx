@@ -32,7 +32,7 @@ export default function UnmappedList({ items }: { items: UnmappedItem[] }) {
   };
 
   return (
-    <div className="card">
+    <div className="card report-table-card">
       <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 text-sm">
         <h2 className="font-bold">매핑이 필요한 품목 {items.length}개</h2>
         <span className="text-xs text-muted">당월 + 전월 매출 큰 순</span>
@@ -57,7 +57,7 @@ export default function UnmappedList({ items }: { items: UnmappedItem[] }) {
           </button>
         </div>
       </div>
-      <div className="data-scroll">
+      <div className="data-scroll" role="region" aria-label="미매핑 품목 표" tabIndex={0}>
         <table className="dtable">
           <thead>
             <tr>

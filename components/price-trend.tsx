@@ -24,7 +24,7 @@ export default function PriceTrend({ trend }: { trend: Trend }) {
   }));
 
   return (
-    <section className="card px-4 py-3">
+    <section className="card price-panel px-4 py-3">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h2 className="text-sm font-bold">동일제품 판매단가 추이</h2>
         <select
@@ -82,7 +82,7 @@ export default function PriceTrend({ trend }: { trend: Trend }) {
             </LineChart>
           </ResponsiveContainer>
         </div>
-        <div className="price-table">
+        <div className="price-table" role="region" aria-label="월별 판매단가 표" tabIndex={0}>
           <table className="dtable">
             <thead>
               <tr>
@@ -125,7 +125,7 @@ export default function PriceTrend({ trend }: { trend: Trend }) {
       </div>
       <details className="method-note">
         <summary>지표 해석 및 비교 기준</summary>
-        <p>동일제품 단가지수는 전월과 당월에 공통으로 판매된 제품의 단가 변동을 누적한 값입니다. 평균단가(매출 ÷ 판매수량 EA)의 변동은 단가 변동과 제품 구성(믹스)·기타 요인으로 구분합니다. 단가가 전월의 0.2배 미만 또는 5배 초과인 제품은 비교에서 제외하며, 당월은 누계 기준입니다.</p>
+        <p>동일제품 단가는 두 달 모두 판매한 제품으로 비교합니다. 평균단가 변동에서 동일제품 단가 변동을 뺀 값이 믹스·기타입니다. 당월은 누계 기준입니다.</p>
       </details>
     </section>
   );

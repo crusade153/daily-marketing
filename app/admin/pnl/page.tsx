@@ -25,7 +25,6 @@ export default async function LedgerPage({
       <div className="page-intro">
         <h1>실적 손익계산서 <span className="il-beta">SAP · 관리자 시범</span></h1>
         <MonthStepper {...monthLinks('/admin/pnl', sel)} />
-        <p>장려금·일반비 수기 입력 없이 SAP 실적(CO-PA 매출·원가, 회계원장 장려금·판관비)만으로 계산한 회사 전체 손익입니다. 관리자에게만 보입니다.</p>
       </div>
       <LedgerPnl data={data} />
     </div>

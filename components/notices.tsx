@@ -55,11 +55,11 @@ export default function Notices({ d }: { d: DashboardData }) {
   if (!link.lastYm)
     items.push(
       <span key="nolink" className="notice-alert" title="구글 시트 sga_link 탭을 읽지 못했거나 비어 있습니다. scripts/import-sga-link.mts로 다시 올리세요.">
-        <b>판관비 연동 데이터 없음</b> — 장려금·일반비를 SAP 원장으로 대체 중
+        <b>판관비 연동 데이터 없음</b> · 마감월은 SAP 원장 사용
       </span>,
     );
   if (replacement) items.push(<span key="rate">원가율 대체 적용 <b>{pct((rateSales + noneSales) / total)}</b> ({eok(rateSales + noneSales)})</span>);
-  if (d.storage === 'local') items.push(<span key="local">입력값은 현재 개발 환경에 저장됩니다.</span>);
+  if (d.storage === 'local') items.push(<span key="local">개발 환경</span>);
   if (needInput)
     items.push(
       <Link key="go" href="/input" prefetch={false} className="notice-action">

@@ -33,11 +33,11 @@ export default function CategoryOverview({ views }: { views: OverviewView[] }) {
   const max = Math.max(...displayed.map((g) => Math.abs(g[metric])), 1);
   const hasNegative = displayed.some((g) => g[metric] < 0);
   return (
-    <section className="card category-panel">
+    <section className="card category-panel" aria-labelledby="outlook-title">
       <div className="panel-heading">
-        <div><h2>실적 전망</h2><p>{view?.label} · 당월 예상</p></div>
+        <div><h2 id="outlook-title">실적 전망</h2><p>{view?.label} · 당월 예상</p></div>
         <div className="flex flex-wrap justify-end gap-1.5">
-          <div className="segmented" role="group" aria-label="비교 기준">
+          <div className="segmented outlook-axis" role="group" aria-label="비교 기준">
             {views.map((v) => (
               <button key={v.id} type="button" aria-pressed={v.id === view?.id} onClick={() => setViewId(v.id)}>{v.label}</button>
             ))}
@@ -50,16 +50,16 @@ export default function CategoryOverview({ views }: { views: OverviewView[] }) {
         </div>
       </div>
       <div className="ranking-heading"><span>{view?.label}</span><span>{METRIC[metric].heading} · 억원</span><span>{metric === 'op' ? 'OP율' : 'GP율'}</span></div>
-      <div className="category-list" tabIndex={0} aria-label={`${view?.label}별 예상 실적 목록`}>
-        {displayed.map((g, i) => {
+      <div className="category-list">
+        {displayed.map((g) => {
           const value = g[metric];
           const width = Math.abs(value) / max * (hasNegative ? 50 : 100);
           return (
             <div key={g.key} className="ranking-row">
-              <span className="ranking-name" title={g.label}><span className="ranking-number">{String(i + 1).padStart(2, '0')}</span>{g.label}</span>
+              <span className="ranking-name" title={g.label}>{g.label}</span>
               <div className="ranking-measure">
                 <div className={`ranking-track ${hasNegative ? 'diverging' : ''}`} aria-hidden="true">
-                  <span style={{ width: `${width}%`, left: `${hasNegative ? (value < 0 ? 50 - width : 50) : 0}%`, background: value < 0 ? 'var(--viz-down)' : 'var(--accent)' }} />
+                  <span style={{ width: `${width}%`, left: `${hasNegative ? (value < 0 ? 50 - width : 50) : 0}%`, background: value < 0 ? 'var(--viz-down)' : 'var(--bar-cur)' }} />
                 </div>
                 <span className="num">{eok(value)}</span>
               </div>

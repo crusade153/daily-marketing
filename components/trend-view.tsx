@@ -74,6 +74,7 @@ const fmtCell = (v: number | null, m: TrendMetric) => (v == null ? '-' : isRate(
 export default function TrendView({ data, axes, ym = null }: { data: TrendData; axes: Axis[]; ym?: string | null }) {
   const router = useRouter();
   const [navPending, startNav] = useTransition();
+  const [tab, setTab] = useState(0);
   const [metric, setMetric] = useState<TrendMetric>('gpm');
   const [focusKey, setFocusKey] = useState<string | null>(null);
 
@@ -135,9 +136,9 @@ export default function TrendView({ data, axes, ym = null }: { data: TrendData; 
   const scopeLabel = focus ? focus.label : '전체';
 
   return (
-    <div className={`space-y-4 transition-opacity duration-200 ${navPending ? 'opacity-50' : ''}`}>
+    <div className={`trend-workspace transition-opacity duration-200 ${navPending ? 'opacity-50' : ''}`}>
       {/* 필터: 화면 전체에 적용 */}
-      <div className="card flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+      <div className="card trend-controls flex flex-wrap items-center gap-3 px-4 py-2 text-sm">
         <label className="flex items-center gap-1.5">
           <span className="text-muted">분석 축</span>
           <select
@@ -152,7 +153,7 @@ export default function TrendView({ data, axes, ym = null }: { data: TrendData; 
             ))}
           </select>
         </label>
-        <div className="flex max-w-full overflow-x-auto rounded-md border border-border" role="group" aria-label="표 지표">
+        {tab === 2 && <div className="flex max-w-full overflow-x-auto rounded-md border border-border" role="group" aria-label="표 지표">
           {METRICS.map((m) => (
             <button
               key={m}
@@ -164,7 +165,7 @@ export default function TrendView({ data, axes, ym = null }: { data: TrendData; 
               {METRIC_LABEL[m]}
             </button>
           ))}
-        </div>
+        </div>}
         {focus && (
           <button
             type="button"
@@ -175,17 +176,17 @@ export default function TrendView({ data, axes, ym = null }: { data: TrendData; 
           </button>
         )}
         <span className="ml-auto text-xs text-muted">
-          {data.dataDate && `데이터 기준일 ${dateLabel(data.dataDate)} · `}마감월 = CO-PA 실적, {monthLabel(months[n - 1].ym)} = 월 예상
+          {data.dataDate && `데이터 기준일 ${dateLabel(data.dataDate)} · `}마감월은 실적 · 진행 중인 달은 월말 예상
         </span>
       </div>
 
-      <AnalysisTabs label="월별 분석 보기" tabs={[
+      <AnalysisTabs label="월별 분석 보기" selectedIndex={tab} onSelect={setTab} tabs={[
       { label: '매출·이익률', content: (
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <section className="card px-4 py-3">
           <h2 className="text-sm font-bold">월별 매출 · {scopeLabel}</h2>
           <p className="mb-2 text-xs text-muted">단위: 억원. 연한 막대는 진행 중인 달의 월 예상</p>
-          <div className="h-[320px]">
+          <div className="trend-chart">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartRows} margin={{ top: 22, right: 8, bottom: 0, left: 0 }} barCategoryGap="28%">
                 <CartesianGrid stroke="var(--viz-grid)" vertical={false} />
@@ -231,7 +232,7 @@ export default function TrendView({ data, axes, ym = null }: { data: TrendData; 
             단위: %. 장려금·일반비를 입력하지 않은 달은 영업이익률을 그리지 않습니다
             {fcstRow ? ` · ${fcstRow.label}은 예상` : ''}
           </p>
-          <div className="h-[320px]">
+          <div className="trend-chart">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartRows} margin={{ top: 22, right: 16, bottom: 0, left: 0 }}>
                 <CartesianGrid stroke="var(--viz-grid)" vertical={false} />
@@ -359,26 +360,17 @@ export default function TrendView({ data, axes, ym = null }: { data: TrendData; 
       </section>
       ) },
       { label: '계층별 월간 현황', content: (
-      <section className="card">
+      <section className="card report-table-card">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-4 py-3">
           <h2 className="text-sm font-bold">
             {AXIS_LABEL[axis]} × 월 · {METRIC_LABEL[metric]}
           </h2>
           <span className="text-xs text-muted">
-            {isRate(metric) ? '단위: %' : '단위: 백만원'} · 계층 선택 시 차트 범위 변경 · 월 선택 시 변동 분석 기준월 변경
+            {isRate(metric) ? '단위: %' : '단위: 백만원'} · 품목군 → 추이 · 월 → 변동 요인
           </span>
           <HeatLegend diverging={diverging} cap={cap} metric={metric} />
         </div>
-        <details className="method-note heat-guide">
-          <summary>이 표 읽는 법</summary>
-          <p>
-            칸 하나 = 그 {AXIS_LABEL[axis]}의 그 달 {METRIC_LABEL[metric]} 값입니다. 색은 값 자체의 크기입니다 — 파랑이 진할수록 크고(이익·이익률이 높음),
-            {diverging ? ' 빨강이 진할수록 손실이 큽니다(0 미만).' : ' 연할수록 작습니다.'} 극단값 하나가 색을 흐리지 않도록 상위 10% 값부터는 같은 가장 진한 색입니다.
-            ① 가로로 읽으면 한 {AXIS_LABEL[axis]}의 월별 흐름(색이 진해지면 개선, 연해지거나 빨개지면 악화), ② 세로로 읽으면 같은 달 {AXIS_LABEL[axis]}끼리 비교입니다.
-            행 이름을 누르면 위 차트가 그 행으로 바뀌고, 월 머리글을 누르면 ‘전월 대비 변동’의 기준월이 바뀝니다. 마지막 달은 월말 예상입니다.
-          </p>
-        </details>
-        <div className="data-scroll">
+        <div className="data-scroll" role="region" aria-label="계층별 월간 현황 표" tabIndex={0}>
           <table className="dtable">
             <thead>
               <tr>
@@ -388,7 +380,7 @@ export default function TrendView({ data, axes, ym = null }: { data: TrendData; 
                     <button
                       type="button"
                       disabled={i === 0}
-                      onClick={() => setBridgeIdx(i)}
+                      onClick={() => { setBridgeIdx(i); setTab(1); }}
                       className={`leading-tight ${i === bridgeIdx ? 'text-accent underline underline-offset-4' : ''} ${i === 0 ? 'cursor-default' : 'hover:text-text'}`}
                       title={i === 0 ? undefined : '브리지 기준월로 보기'}
                     >
@@ -425,7 +417,7 @@ export default function TrendView({ data, axes, ym = null }: { data: TrendData; 
                     <td className="sticky left-0 z-[1] max-w-[240px] bg-surface">
                       <button
                         type="button"
-                        onClick={() => setFocusKey(sel ? null : g.key)}
+                        onClick={() => { setFocusKey(sel ? null : g.key); setTab(0); }}
                         aria-pressed={sel}
                         title={`${g.label} (${g.key})`}
                         className={`block w-full truncate text-left ${sel ? 'font-semibold text-accent' : 'hover:text-accent'}`}

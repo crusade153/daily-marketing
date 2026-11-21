@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import AnalysisTabs from './analysis-tabs';
 import { cmRank } from '@/lib/pnl';
 import {
   CartesianGrid,
@@ -345,6 +346,7 @@ export default function SegmentView({
   const [xc, setXc] = useState<Cut>({ method: 'manual', pareto: 0.8, manual: AMOUNT_CUT });
   const [yc, setYc] = useState<Cut>({ method: 'zero', pareto: 0.8, manual: 0 });
   const [rank, setRank] = useState(false);
+  const [tab, setTab] = useState(0);
   const [pm, setPm] = useState<SegMetric>('net');
   const [focusQ, setFocusQ] = useState<Quadrant | null>(null);
   const [cmp, setCmp] = useState<'fcst' | 'prev'>('fcst');
@@ -656,8 +658,9 @@ export default function SegmentView({
             </button>
           </div>
         </div>
-        <div className="seg-row seg-sandbox">
-          <span className="seg-row-title">시뮬레이션</span>
+        <details className="seg-simulation">
+          <summary>분류 기준·시뮬레이션</summary>
+          <div className="seg-row seg-sandbox">
           <CutControl axis="X" metric={xm} cut={xc} value={seg?.cx ?? null} period={period} onMetric={(m) => changeMetric('x', m)} onCut={(c) => { setXc(c); resetFilters(); }} />
           <CutControl axis="Y" metric={ym} cut={yc} value={seg?.cy ?? null} period={period} onMetric={(m) => changeMetric('y', m)} onCut={(c) => { setYc(c); resetFilters(); }} />
           <div className="segmented" role="group" aria-label="축 척도">
@@ -672,16 +675,18 @@ export default function SegmentView({
             ))}
           </div>
         </div>
+        </details>
         {(usesOp && meta.costNote) || (seg && seg.excluded > 0) ? (
           <p className="seg-note">
-            {usesOp && meta.costNote && <span>{meta.costNote} — 미입력 채널은 순매출이 총매출과, 영업이익이 매출총이익과 같습니다.</span>}
-            {seg && seg.excluded > 0 && <span>{xLabel}·{yLabel} 값이 없는 {unitName} {seg.excluded}개 제외 (매출 0인 이익률, 비교 기간 매출 0인 성장률 등)</span>}
+            {usesOp && meta.costNote && <span>{meta.costNote}</span>}
+            {seg && seg.excluded > 0 && <span>{xLabel}·{yLabel} 값 없음 · {unitName} {seg.excluded}개 제외</span>}
           </p>
         ) : null}
       </div>
 
-      {/* ── 매트릭스 + 사분면 요약 ── */}
-      <div className="seg-main">
+      <AnalysisTabs label="등급 보고서" selectedIndex={tab} onSelect={setTab} tabs={[
+        { label: '등급 분포', content: (
+          <div className="seg-main">
         <section className="card seg-matrix" aria-labelledby="seg-matrix-title">
           <div className="panel-heading">
             <div>
@@ -690,7 +695,7 @@ export default function SegmentView({
                 <b className="seg-period-badge">{meta.label}</b> {scopeLabel} · {unitName} {summary.n.toLocaleString()}개 · X {xLabel} / Y {yLabel}
               </p>
             </div>
-            <span className="unit-label">점을 누르면 리스트에서 강조</span>
+            <span className="unit-label">점 선택 → 주요 품목</span>
           </div>
           <div className="seg-chart">
             {plot && <span className="seg-y-title">↑ {yLabel}{rank ? ' 순위(0~100)' : ''}</span>}
@@ -776,7 +781,15 @@ export default function SegmentView({
                       stroke="var(--surface)"
                       strokeWidth={1}
                       isAnimationActive={false}
-                      onClick={(d: { payload?: Pt }) => d?.payload && setSelected((s) => (s === d.payload!.key ? null : d.payload!.key))}
+                      onClick={(d: { payload?: Pt }) => {
+                        if (!d.payload) return;
+                        setSelected(d.payload.key);
+                        setFocusQ(null);
+                        setBand('');
+                        setQuery(d.payload.code);
+                        setLimit(PAGE);
+                        setTab(2);
+                      }}
                       className="cursor-pointer"
                     />
                   ))}
@@ -816,7 +829,10 @@ export default function SegmentView({
                   aria-pressed={focusQ === q}
                   onClick={() => {
                     setFocusQ((f) => (f === q ? null : q));
+                    setQuery('');
+                    setBand('');
                     setLimit(PAGE);
+                    setTab(2);
                   }}
                 >
                   <span className="seg-quad-head">
@@ -845,14 +861,18 @@ export default function SegmentView({
               );
             })}
           </div>
-
+        </aside>
+      </div>
+        ) },
+        { label: '등급 변동', content: (
+      <div className="seg-migration">
           <section className="card seg-move" aria-labelledby="seg-move-title">
             <div className="panel-heading">
               <div>
                 <h2 id="seg-move-title">등급 변동</h2>
                 <p>
-                  전월 등급(행) → 당월 등급(열) · 칸·합계를 누르면 아래 상세
-                  {period === 'ytd' && <span className="seg-move-ytd"> · 누계에는 월 비교가 없어 아래에서 고른 두 달로 봅니다</span>}
+                  전월 등급(행) → 당월 등급(열)
+                  {period === 'ytd' && <span className="seg-move-ytd"> · 월 단위 비교</span>}
                 </p>
               </div>
             </div>
@@ -961,10 +981,6 @@ export default function SegmentView({
               <p className="seg-empty">선택한 조건에 비교할 실적이 없습니다.</p>
             )}
           </section>
-        </aside>
-      </div>
-
-      {/* ── 등급 변동 상세: 모든 품목의 등급 히스토리 ── */}
       <section className="card seg-list" aria-labelledby="seg-moves-title">
         <div className="seg-list-head">
           <h2 id="seg-moves-title">등급 변동 상세</h2>
@@ -1046,11 +1062,12 @@ export default function SegmentView({
           {!moveRows.length && <p className="seg-empty">해당하는 {unitName}이 없습니다.</p>}
         </div>
         <p className="seg-list-foot">
-          금액 백만원 · 전월 {periodLabel(cmpFrom)}, 당월 {periodLabel(cmp)} · 악화(빨강) → 개선(초록) → 신규 → 판매 없음 → 유지(흐리게) 순, 악화·개선은 {yLabel} 변화가 큰 순 · 기준선은 각 달 안에서 다시 계산(기준 금액·0 기준은 그대로)
+          금액 백만원 · 악화·개선은 {yLabel} 변화가 큰 순
         </p>
       </section>
-
-      {/* ── 파레토 ── */}
+      </div>
+        ) },
+        { label: '주요 품목', content: (
       <div className="seg-pareto">
         <section className="card seg-curve" aria-labelledby="seg-curve-title">
           <div className="panel-heading">
@@ -1191,6 +1208,8 @@ export default function SegmentView({
           <p className="seg-list-foot">금액 백만원, 수량 EA · 행을 누르면 그래프에서 강조</p>
         </section>
       </div>
+        ) },
+      ]} />
     </div>
   );
 }

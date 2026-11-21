@@ -98,10 +98,10 @@ export default function LineOwnerEditor({ lines, unlined, curLabel }: { lines: L
     <div className="card lo-card">
       <div className="lo-head">
         <div>
-          <h2>제품라인별 CM·PM 담당자 (참고)</h2>
+          <h2>제품라인별 CM·PM 담당자</h2>
           <p>
-            분석 화면의 CM은 시트 CM1~CM3 표시, PM은 시트 담당자 열을 그대로 씁니다. 여기 CM명은 참고용으로 시트에만 저장되고, PM명은 시트 담당자가 비어 있는 품목에만 채워집니다.
-            {unlined > 0 && ` 제품라인(카테고리)이 비어 있는 품목 ${unlined.toLocaleString()}개는 시트에서 제품라인을 먼저 채워야 합니다.`}
+            CM명은 참고용 · PM명은 담당자 미등록 품목에 적용
+            {unlined > 0 && ` · 제품라인 미등록 ${unlined.toLocaleString()}개`}
           </p>
         </div>
       </div>

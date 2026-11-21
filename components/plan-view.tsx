@@ -103,7 +103,7 @@ export default function PlanView({
       });
 
   return (
-    <div className="card pivot-card">
+    <div className="plan-layout">
       <section className="kpi-grid" aria-label="판매계획 요약">
         <div className="card kpi-card">
           <div className="kpi-title">{monthLabel(ym)} 판매계획{scenario === 'mtd' ? ' (× 진행률)' : ''}</div>
@@ -118,15 +118,16 @@ export default function PlanView({
         <div className="card kpi-card">
           <div className="kpi-title">매출 달성률</div>
           <div className={`kpi-value ${achCls(totalAch)}`}>{pct(totalAch)}</div>
-          <div className="kpi-sub">{t.plan != null ? `차이 ${signedMil(t.plannedActual - t.plan)}백만원` : '계획을 입력하면 계산합니다'}</div>
+          <div className="kpi-sub">{t.plan != null ? `계획 대비 ${signedMil(t.plannedActual - t.plan)}백만원` : '판매계획 미입력'}</div>
         </div>
         <div className="card kpi-card">
           <div className="kpi-title">계획 미수립 LV3 매출</div>
           <div className="kpi-value">{eok(unplanned)}</div>
-          <div className="kpi-sub">{t.actual ? `전체 매출의 ${pct(unplanned / t.actual)} · 달성률 계산에서 제외` : ''}</div>
+          <div className="kpi-sub">{t.actual ? `전체 매출의 ${pct(unplanned / t.actual)}` : ''}</div>
         </div>
       </section>
 
+      <div className="card report-table-card plan-table">
       <div className="pivot-row">
         <div className="pivot-scenario" role="group" aria-label="기간">
           {(['mtd', 'fcst', 'prev'] as Scenario[]).map((s) => (
@@ -144,7 +145,7 @@ export default function PlanView({
           <button type="button" className="rounded px-2 py-1 hover:bg-surface-2" onClick={() => expandAll(2)}>LV3 펼침</button>
           <button type="button" className="rounded px-2 py-1 hover:bg-surface-2" onClick={() => expandAll(0)}>모두 접기</button>
         </div>
-        <span className="ml-auto text-xs text-muted">단위: 백만원{scenario === 'mtd' ? ' · 누계는 월 계획 × 진행률과 비교' : ''}</span>
+        <span className="ml-auto text-xs text-muted">백만원 · 달성률은 계획이 있는 품목 기준{scenario === 'mtd' ? ' · 월 계획 × 진행률' : ''}</span>
       </div>
 
       {t.plan == null && (
@@ -153,7 +154,7 @@ export default function PlanView({
         </p>
       )}
 
-      <div className="data-scroll">
+      <div className="data-scroll" role="region" aria-label="판매계획 대비 표" tabIndex={0}>
         <table className="dtable pivot-dtable">
           <thead>
             <tr className="pivot-group-row">
@@ -176,6 +177,7 @@ export default function PlanView({
             {render(tree.nodes, 0, '')}
           </tbody>
         </table>
+      </div>
       </div>
     </div>
   );

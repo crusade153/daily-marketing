@@ -4,7 +4,7 @@ import { metrics, type Metrics } from '@/lib/pnl';
 import { monthLabel } from '@/lib/period';
 import type { Amounts, DashboardData } from '@/lib/types';
 
-type Line = { label: string; get: (m: Metrics) => number | null; rate?: boolean; strong?: boolean; cost?: boolean };
+type Line = { label: string; get: (m: Metrics) => number | null; rate?: boolean; strong?: boolean; cost?: boolean; final?: boolean };
 
 // 순매출 = 총매출 − 장려금, 매출총이익 = 순매출 − 매출원가, 영업이익 = 매출총이익 − 일반비. 이익률은 순매출 대비
 const LINES: Line[] = [
@@ -15,7 +15,7 @@ const LINES: Line[] = [
   { label: '매출총이익', get: (m) => m.gp, strong: true },
   { label: 'GP율', get: (m) => m.gpm, rate: true },
   { label: '일반비', get: (m) => m.general, cost: true },
-  { label: '영업이익', get: (m) => m.op, strong: true },
+  { label: '영업이익', get: (m) => m.op, strong: true, final: true },
   { label: 'OP율', get: (m) => m.opm, rate: true },
 ];
 
@@ -35,12 +35,12 @@ export default function PnlStatement({
   const fcst = metrics(total.fcst);
   const prev = metrics(total.prev);
   return (
-    <section className="card statement-panel">
+    <section className="card statement-panel" aria-labelledby="statement-title">
       <div className="panel-heading">
-        <div><h2>손익 요약</h2><p>당월 예상과 전월 실적 비교</p></div>
+        <h2 id="statement-title">손익 요약</h2>
         <span className="unit-label">백만원 · %</span>
       </div>
-      <div className="statement-table overflow-x-auto">
+      <div className="statement-table overflow-x-auto" tabIndex={0} role="region" aria-label="손익 요약 표">
       <table className="dtable">
         <thead>
           <tr>
@@ -48,7 +48,7 @@ export default function PnlStatement({
             <th className="num">{monthLabel(curYm)} 누계</th>
             <th className="num">{monthLabel(curYm)} 예상</th>
             <th className="num">{monthLabel(prevYm)} 실적</th>
-            <th className="num">예상 − 전월</th>
+            <th className="num" title="당월 예상에서 전월 마감 실적을 뺀 금액">전월 차이</th>
             <th className="num">증감률</th>
           </tr>
         </thead>
@@ -61,20 +61,20 @@ export default function PnlStatement({
             const diff = l.rate ? ppt(f, p) : f != null && p != null ? signedMil(f - p) : '-';
             const diffNum = f != null && p != null ? (l.cost ? p - f : f - p) : null;
             return (
-              <tr key={l.label} className={l.strong ? 'statement-key' : l.rate ? 'statement-rate text-muted' : ''}>
-                <td className={l.rate ? 'pl-6' : ''}>{l.label}</td>
+              <tr key={l.label} className={l.final ? 'statement-final' : l.strong ? 'statement-key' : l.rate ? 'statement-rate text-muted' : ''}>
+                <th scope="row" className="statement-label">{l.label}</th>
                 <td className="num">{fmt(a)}</td>
                 <td className="num bg-accent-soft/40">{fmt(f)}</td>
                 <td className="num">{fmt(p)}</td>
                 <td className={`num ${tone(diffNum)}`}>{diff}</td>
-                <td className="num text-muted">{l.rate || f == null || p == null || p <= 0 ? '' : pct(growth(f, p))}</td>
+                <td className="num text-muted">{l.rate || f == null || p == null || p <= 0 ? '—' : pct(growth(f, p))}</td>
               </tr>
             );
           })}
         </tbody>
       </table>
       </div>
-      <div className="panel-footer"><span>{sourceText(inputStatus.cur, inputStatus.sgTotal, inputStatus.chTotal)}</span><span>전월 대비: 월 전체 기준</span></div>
+      <div className="panel-footer"><span>{sourceText(inputStatus.cur, inputStatus.sgTotal, inputStatus.chTotal)}</span><span>이익률은 순매출 기준</span></div>
     </section>
   );
 }

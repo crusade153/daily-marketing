@@ -8,7 +8,7 @@ import { getIncentiveSheet, incentiveSheetUrl } from '@/lib/incentive-sheet';
 import { getPlanSheet, planSheetUrl } from '@/lib/plan-sheet';
 import { getChannelInputs, getChannelTotals, getIncentiveGroups, getMonthBlocks, getPlanItems, getSgaLink, getTargets } from '@/lib/data';
 import { forecastFactor, ORPHAN_NAME } from '@/lib/pnl';
-import { monthLabel, yearStartOf, ymRange } from '@/lib/period';
+import { yearStartOf, ymRange } from '@/lib/period';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +34,7 @@ export default async function InputPage({
   const sheetUrl = process.env.SHEET_ID ? `https://docs.google.com/spreadsheets/d/${process.env.SHEET_ID}/edit` : null;
 
   let body: React.ReactNode;
-  let intro: React.ReactNode;
+  let instruction: string;
   if (tab === 'incentive') {
     // 장려금: 별도 구글 시트(영업그룹 탭 × 고객그룹3 × 카테고리)에서 입력. 판관비 연동 달 다음 달부터
     const [link, totals, groups, sheet] = await Promise.all([getSgaLink(), getChannelTotals(), getIncentiveGroups(), getIncentiveSheet()]);
@@ -59,16 +59,7 @@ export default async function InputPage({
       for (const x of sum.values()) list.push({ sg: x.sg, sgt: x.sgt, cells: 0, sales: refSales(x.sg, ym), rows: x.rows, filled: x.filled, total: x.total });
       status[ym] = list;
     }
-    intro = (
-      <>
-        장려금은 장려금 구글 시트에서 영업그룹 탭마다 고객그룹 × 카테고리(제품라인)별 10개 항목 금액을 입력하고, 그 칸의 제품별 매출 비중으로 배부합니다. 입력 금액은 월 전체 금액이며 누계 손익에는 월 진행률만큼 반영합니다.{' '}
-        {link.months.length ? (
-          <>
-            <b>{`${monthLabel(link.months[0].ym)}~${monthLabel(lastLinked)}`}</b>은 판관비 대시보드 연동 데이터를 쓰므로 입력하지 않습니다.
-          </>
-        ) : null}
-      </>
-    );
+    instruction = '장려금 시트 · 영업그룹별 월 금액';
     body = months.length ? (
       <IncentivePanel months={months} curYm={d.curYm} status={status} sheetUrl={incentiveSheetUrl()} sheetError={sheet.error} />
     ) : (
@@ -89,14 +80,7 @@ export default async function InputPage({
     const list = totals.channels.map(toItem);
     for (const s of saved) if (!list.some((it) => it.key === s.ch)) list.push({ key: s.ch, label: s.cht || s.ch, ref: {} });
     const amounts: SavedAmount[] = saved.map((s) => ({ ym: s.ym, key: s.ch, amount: s.general, updatedAt: s.updatedAt, updatedBy: s.updatedBy }));
-    const what = '일반비는 고객그룹3별 월 금액을 입력하고, 그 고객그룹3 안에서 제품별 매출 비중으로 배부합니다';
-    intro = (
-      <>
-        {what}. 입력 금액은 월 전체 금액이며 누계 손익에는 월 진행률만큼 반영합니다.{' '}
-        <b>{link.months.length ? `${monthLabel(link.months[0].ym)}~${monthLabel(lastLinked)}` : ''}</b>
-        {link.months.length ? '은 판관비 대시보드 연동 데이터를 쓰므로 입력하지 않습니다.' : ''}
-      </>
-    );
+    instruction = '고객그룹3별 월 일반비';
     body = months.length ? (
       <AmountGrid
         key={tab}
@@ -118,7 +102,7 @@ export default async function InputPage({
     const plans: Record<string, Record<string, number>> = {};
     for (const p of sheet.plans) (plans[p.ym] ??= {})[p.l3] = (plans[p.ym][p.l3] ?? 0) + p.sales;
     const inSheet = new Set(sheet.l3s);
-    intro = '제품계층 LV3별 월 판매계획(매출 금액)은 구글 시트에서 직접 입력합니다. 입력한 당월 계획은 경영 요약·손익 분석의 ‘당월 예상’ 매출에 그대로 반영됩니다. 계획이 LV3 단위라 ‘판매계획 대비’ 분석도 LV3까지입니다.';
+    instruction = '판매계획 시트 · 제품계층 LV3별 월 매출';
     body = (
       <PlanPanel
         months={months}
@@ -156,7 +140,7 @@ export default async function InputPage({
         op: list.reduce((s, t) => s + t.op, 0),
       };
     });
-    intro = '제품별 월 목표(매출·GP·OP)는 구글 시트에서 입력합니다. 입력한 목표는 제품별 손익 분석의 목표·목표비에 반영됩니다.';
+    instruction = '목표 시트 · 제품별 월 매출·이익';
     body = <TargetPanel months={yearMonths} curYm={d.curYm} status={status} products={products} sheetUrl={sheetUrl} />;
   }
 
@@ -164,10 +148,7 @@ export default async function InputPage({
     <div className={tab === 'target' ? 'mapping-page' : 'data-page'}>
       <div className="page-intro">
         <h1>비용·계획 입력</h1>
-        <p>
-          {intro}
-          {d.storage === 'local' && ' 현재 입력값은 개발 환경에 저장됩니다.'}
-        </p>
+        <span className="heading-note">{instruction}{d.storage === 'local' && ' · 개발 환경'}</span>
       </div>
       <nav className="view-switch" aria-label="입력 종류">
         {TABS.map((t) => (

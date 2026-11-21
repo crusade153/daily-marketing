@@ -17,10 +17,13 @@ export default function RefreshButton() {
           router.refresh();
         })
       }
-      className="rounded-md border border-border px-3 py-1.5 text-xs text-muted hover:bg-surface-2 disabled:opacity-50"
+      className="header-button"
       title="BigQuery와 구글 시트를 다시 읽습니다"
     >
-      {pending ? '불러오는 중…' : <><span className="only-pc">데이터 </span>새로고침</>}
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 11a8 8 0 0 0-14-5L3 9m0-5v5h5 M4 13a8 8 0 0 0 14 5l3-3m0 5v-5h-5" />
+      </svg>
+      {pending ? '불러오는 중…' : <span><span className="only-pc">데이터 </span>새로고침</span>}
     </button>
   );
 }

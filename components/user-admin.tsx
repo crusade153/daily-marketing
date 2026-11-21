@@ -91,7 +91,6 @@ export default function UserAdmin({ users, autoApprove, me }: { users: UserView[
       <div className="lo-head ua-head">
         <div>
           <h2>계정 {users.length}개{waiting > 0 && <span className="ua-waiting">승인 대기 {waiting}</span>}</h2>
-          <p>STATUS가 ACTIVE인 계정만 로그인할 수 있습니다. 승인 대기(PENDING) 계정은 위에 모아 보여 줍니다. 비밀번호는 권한관리 시트 PW 칸에서 확인할 수 있습니다.</p>
         </div>
         <button type="button" role="switch" aria-checked={auto} className="ua-switch" onClick={toggleAuto} disabled={pending}>
           <span className="ua-track" aria-hidden="true"><span /></span>

@@ -16,7 +16,6 @@ export default async function UsersPage() {
     <div className="mapping-page">
       <div className="page-intro">
         <h1>회원관리</h1>
-        <p>앱에 들어올 수 있는 계정을 관리합니다. STATUS를 PENDING으로 바꾸거나 계정을 삭제하면 5분 안에 접속이 끊깁니다. 내용은 권한관리 구글 시트에 바로 저장되며, 시트에서 직접 고쳐도 됩니다.</p>
       </div>
       <UserAdmin users={views} autoApprove={autoApprove} me={me.loginId} />
     </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { mil, signedMil } from '@/lib/format';
 import { GRADE_ACTION, GRADE_NAME, QUADRANTS, type Quadrant } from '@/lib/segment';
 import type { GradeChange } from '@/lib/grade';
@@ -30,7 +30,8 @@ export default function GradeAlert({
 }) {
   const [focus, setFocus] = useState<Quadrant | null>(null);
   const [all, setAll] = useState(false);
-  const [hidden, setHidden] = useState(false);
+  const [hidden, setHidden] = useState(true);
+  const title = useId();
 
   const stat = useMemo(() => {
     const s = Object.fromEntries(QUADRANTS.map((q) => [q, { now: 0, before: 0, op: 0 }])) as Record<Quadrant, { now: number; before: number; op: number }>;
@@ -104,12 +105,13 @@ export default function GradeAlert({
   const more = Math.max(lists.down.length, lists.up.length) > SHOW;
 
   return (
-    <section className={`card grade-alert ${hidden ? 'is-hidden' : ''}`} aria-labelledby="ga-title">
+    <section className={`card grade-alert ${hidden ? 'is-hidden' : ''}`} aria-labelledby={title}>
       <div className="ga-head">
-        <h2 id="ga-title">등급 신호등</h2>
+        <h2 id={title}>등급 변동</h2>
         <span className="text-muted">
-          {fromLabel} → {toLabel} · {unitLabel} {changes.length.toLocaleString()}개 · 영업이익 변화 큰 순
+          {fromLabel} → {toLabel}
         </span>
+        <span className="grade-count"><span className="dn">악화 {lists.down.length.toLocaleString()}개</span><span className="up">개선 {lists.up.length.toLocaleString()}개</span></span>
         {focus && (
           <button type="button" className="seg-link" onClick={() => setFocus(null)}>
             {focus} 필터 해제
@@ -117,7 +119,7 @@ export default function GradeAlert({
         )}
         {picked && (
           <button type="button" className="seg-link" onClick={() => onPick(null)}>
-            표 좁히기 해제
+            표 필터 해제
           </button>
         )}
         <span className="ga-tools">
@@ -127,7 +129,7 @@ export default function GradeAlert({
             </button>
           )}
           <button type="button" onClick={() => setHidden((v) => !v)} aria-expanded={!hidden}>
-            {hidden ? '펼치기' : '숨기기'}
+            {hidden ? '등급 상세' : '등급 접기'}
           </button>
         </span>
       </div>
